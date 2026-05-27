@@ -1,0 +1,40 @@
+{
+  "literatura_y_escritura": [
+    "poema", "verso", "metáfora", "pluma", "tinta", "cuaderno", "prosa", "cuento", "novela", "narrador",
+    "trama", "personaje", "escena", "párrafo", "autor", "editorial", "voz", "estilo", "borrador", "manuscrito",
+    "lectura", "rima", "paratexto", "relato", "epígrafe", "ficción", "narración", "drama", "ensayo", "reseña",
+    "editor", "tipografía", "imprenta", "orador", "argumento", "conflicto", "diálogo", "monólogo", "estructura", "acto",
+    "clímax", "desenlace", "suspenso", "anécdota", "símbolo", "signo", "lema", "gramática", "puntuación", "oración",
+    "palabra", "léxico", "semántica", "sintaxis", "vocablo", "sinónimo", "antónimo", "hipérbole", "oxímoron", "ironía",
+    "paradoja", "repetición", "cadencia", "ritmo", "musicalidad", "título", "subtítulo", "portada", "índice", "capítulo",
+    "subtexto", "intertexto", "secuencia", "focalización", "canon", "crítica", "reseñista", "narratología", "cuentista", "escritora"
+  ],
+  "literatura_latinoamericana": [
+    "realismo", "fantástico", "mágico", "barroco", "criollismo", "gauchesca", "testimonio", "vanguardia", "modernismo", "mestizaje",
+    "oralidad", "selva", "pampa", "cordillera", "carnaval", "mate", "tango", "bolero", "cumbia", "milonga",
+    "mestizo", "colonizador", "indigenismo", "afrolatino", "frontera", "destierro", "exilio", "dictadura", "revolución", "memoria",
+    "resistencia", "desaparición", "archivo", "identidad", "lengua", "habla", "dialecto", "lunfardo", "neologismo", "escritura",
+    "crónica", "testigo", "censura", "grieta", "travesía", "zamba", "guaraní", "mapuche", "quilombo", "utopía",
+    "distopía", "latino", "caribe", "voz", "territorio", "frontera", "ciudad", "suburbio", "nación", "pueblo",
+    "idioma", "traducción", "sueño", "anhelo", "camino", "mito", "leyenda", "memorias", "denuncia", "opresión"
+  ],
+  "creatividad": [
+    "idea", "chispa", "musa", "inspiración", "creación", "imaginación", "sueño", "delirio", "impulso", "juego",
+    "fantasía", "invención", "diseño", "ingenio", "arte", "libertad", "locura", "visión", "deseo", "creador",
+    "artefacto", "universo", "mente", "intuición", "originalidad", "rareza", "símbolo", "máscara", "laberinto", "espejo",
+    "sombra", "silencio", "eco", "destello", "fluidez", "vértigo", "azar", "magia", "ritual", "performance",
+    "estilo", "artificio", "ruptura", "collage", "fragmento", "contradicción", "metamorfosis", "pintura", "teatro", "boceto",
+    "borrador", "vibración", "conexión", "voz", "forma", "caos", "orden", "estética", "curiosidad", "transformación",
+    "ocurrencia", "mirada", "perspectiva", "exploración", "intensidad", "color", "gesto", "horizonte", "trazo", "mapa"
+  ],
+  "rioplatense_poetico": [
+    "mate", "lunfardo", "esquina", "conventillo", "arrabal", "cambalache", "murga", "bandoneón", "tanguito", "farol",
+    "empedrado", "orilla", "baldosa", "colectivo", "subte", "almacén", "zaguán", "nostalgia", "melancolía", "bohemia",
+    "tertulia", "sobremesa", "boliche", "zamba", "grieta", "posta", "patriada", "barrilete", "laburo", "suburbio",
+    "versito", "chamuyo", "compadrito", "mina", "gil", "payador", "gaucho", "mateo", "letrista", "percanta",
+    "milonga", "sur", "espina", "rastro", "trazo", "pucho", "arrullo", "sombra", "reflejo", "huella",
+    "pasaje", "balcón", "cúpula", "susurro", "bruma", "garúa", "parpadeo", "latido", "rumor", "pálpito",
+    "puerto", "costanera", "niebla", "carruaje", "bardo", "cancionero", "lunfa", "picardía", "cuartito", "soplo",
+    "penumbra", "murmullo", "centella", "querencia", "rincón", "revuelo", "silueta", "madrugada", "resuello", "alboroto"
+  ]
+}

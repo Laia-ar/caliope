@@ -1,0 +1,11 @@
+.env
+.env.local
+*node_modules
+__pycache__
+app.db
+.vscode
+.next/
+next-env.d.ts
+users.json
+usuarios.json
+usuarios.txt

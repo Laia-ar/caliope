@@ -1,0 +1,26 @@
+# Python
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+*.egg
+dist/
+build/
+
+# Database
+instance/
+*.db
+*.sqlite
+
+# Environment
+.env
+.env.local
+
+# Custom
+users.json
+usuarios.json
+usuarios.txt

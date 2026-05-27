@@ -1,0 +1,36 @@
+services:
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      - DOMAIN=${DOMAIN:-localhost}
+    depends_on:
+      - app
+    restart: always
+
+  app:
+    build:
+      context: .
+      args:
+        - NEXT_PUBLIC_BACKEND_URL=${NEXT_PUBLIC_BACKEND_URL:-http://127.0.0.1:5000}
+    env_file:
+      - .env
+    environment:
+      - BACKEND_URL=${BACKEND_URL:-http://127.0.0.1:5000}
+      - FRONTEND_URL=${FRONTEND_URL:-http://127.0.0.1:3000}
+    ports:
+      - "3000:3000"
+    volumes:
+      - app-data:/app/backend/instance
+    restart: always
+
+volumes:
+  app-data:
+  caddy-data:
+  caddy-config:

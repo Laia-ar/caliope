@@ -1,0 +1,10 @@
+{$DOMAIN} {
+    # Auth and API routes go directly to backend
+    reverse_proxy /login app:5000
+    reverse_proxy /logout app:5000
+    reverse_proxy /login/callback app:5000
+    reverse_proxy /api/* app:5000
+
+    # Everything else goes to frontend
+    reverse_proxy /* app:3000
+}
