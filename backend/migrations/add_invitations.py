@@ -6,7 +6,7 @@ import sqlite3
 import os
 import sys
 
-DB_PATH = os.path.join(os.path.dirname(__file__), '..', '..', 'instance', 'app.db')
+DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'instance', 'app.db')
 
 def column_exists(cursor, table, column):
     cursor.execute(f"PRAGMA table_info({table})")
