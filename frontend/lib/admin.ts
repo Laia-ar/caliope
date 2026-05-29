@@ -16,6 +16,7 @@ export interface AdminUser {
   email: string
   name: string
   is_admin: boolean
+  can_create_sessions: boolean
 }
 
 function coerceRecord(value: unknown): Record<string, unknown> {
@@ -55,6 +56,7 @@ function normalizeUser(raw: unknown): AdminUser {
       typeof data.is_admin === "boolean"
         ? data.is_admin
         : typeof data.username === "string" && data.username.toLowerCase() === "admin",
+    can_create_sessions: typeof data.can_create_sessions === "boolean" ? data.can_create_sessions : false,
   }
 }
 
@@ -137,4 +139,11 @@ export async function updateUsersRawJson(rawContent: string): Promise<void> {
       },
     },
   )
+}
+
+export async function updateTeacherStatus(userId: number, canCreateSessions: boolean): Promise<void> {
+  await adminFetch(`/api/admin/users/${userId}/teacher-status`, {
+    method: "PUT",
+    body: JSON.stringify({ can_create_sessions: canCreateSessions }),
+  })
 }

@@ -22,11 +22,12 @@ export function Sidebar({ isCollapsed = false, onToggle }: SidebarProps) {
   const [isHovered, setIsHovered] = useState(false)
   const [isLoggingOut, setIsLoggingOut] = useState(false)
   const [isAdminUser, setIsAdminUser] = useState(false)
+  const [canCreateSessions, setCanCreateSessions] = useState(false)
 
   useEffect(() => {
     let cancelled = false
 
-    const checkAdmin = async () => {
+    const checkAuth = async () => {
       try {
         const response = await fetch("/api/check-auth", {
           credentials: "include",
@@ -39,13 +40,14 @@ export function Sidebar({ isCollapsed = false, onToggle }: SidebarProps) {
         const data = await response.json().catch(() => null)
         if (!cancelled && data && typeof data.username === "string") {
           setIsAdminUser(data.username.toLowerCase() === "admin")
+          setCanCreateSessions(!!data.can_create_sessions)
         }
       } catch (error) {
         // Ignored on purpose: sidebar remains without admin link if request fails
       }
     }
 
-    void checkAdmin()
+    void checkAuth()
 
     return () => {
       cancelled = true
@@ -73,17 +75,23 @@ export function Sidebar({ isCollapsed = false, onToggle }: SidebarProps) {
     },
   ]
 
-  const navItems = isAdminUser
-    ? [
-        ...baseNavItems,
-        {
-          href: "/admin",
-          label: "Administración",
-          icon: "/icons/help-icon.svg",
-          iconAlt: "Panel de administración",
-        },
-      ]
-    : baseNavItems
+  let navItems = [...baseNavItems]
+  if (canCreateSessions) {
+    navItems.push({
+      href: "/sessions",
+      label: "Sesiones",
+      icon: "/icons/help-icon.svg",
+      iconAlt: "Gestionar sesiones",
+    })
+  }
+  if (isAdminUser) {
+    navItems.push({
+      href: "/admin",
+      label: "Administración",
+      icon: "/icons/help-icon.svg",
+      iconAlt: "Panel de administración",
+    })
+  }
 
   const handleHelpClick = (e: React.MouseEvent) => {
     e.preventDefault()
