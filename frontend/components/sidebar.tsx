@@ -22,6 +22,7 @@ export function Sidebar({ isCollapsed = false, onToggle }: SidebarProps) {
   const [isHovered, setIsHovered] = useState(false)
   const [isLoggingOut, setIsLoggingOut] = useState(false)
   const [isAdminUser, setIsAdminUser] = useState(false)
+  const [canCreateInvites, setCanCreateInvites] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -39,6 +40,7 @@ export function Sidebar({ isCollapsed = false, onToggle }: SidebarProps) {
         const data = await response.json().catch(() => null)
         if (!cancelled && data && typeof data.username === "string") {
           setIsAdminUser(data.username.toLowerCase() === "admin")
+          setCanCreateInvites(data.can_create_invites === true)
         }
       } catch (error) {
         // Ignored on purpose: sidebar remains without admin link if request fails
@@ -73,17 +75,29 @@ export function Sidebar({ isCollapsed = false, onToggle }: SidebarProps) {
     },
   ]
 
-  const navItems = isAdminUser
-    ? [
-        ...baseNavItems,
-        {
-          href: "/admin",
-          label: "Administración",
-          icon: "/icons/help-icon.svg",
-          iconAlt: "Panel de administración",
-        },
-      ]
-    : baseNavItems
+  let navItems = baseNavItems
+  if (canCreateInvites) {
+    navItems = [
+      ...navItems,
+      {
+        href: "/invitations",
+        label: "Invitaciones",
+        icon: "/icons/help-icon.svg",
+        iconAlt: "Invitaciones",
+      },
+    ]
+  }
+  if (isAdminUser) {
+    navItems = [
+      ...navItems,
+      {
+        href: "/admin",
+        label: "Administración",
+        icon: "/icons/help-icon.svg",
+        iconAlt: "Panel de administración",
+      },
+    ]
+  }
 
   const handleHelpClick = (e: React.MouseEvent) => {
     e.preventDefault()

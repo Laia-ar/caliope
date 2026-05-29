@@ -16,6 +16,7 @@ export interface AdminUser {
   email: string
   name: string
   is_admin: boolean
+  can_create_invites: boolean
 }
 
 function coerceRecord(value: unknown): Record<string, unknown> {
@@ -55,6 +56,8 @@ function normalizeUser(raw: unknown): AdminUser {
       typeof data.is_admin === "boolean"
         ? data.is_admin
         : typeof data.username === "string" && data.username.toLowerCase() === "admin",
+    can_create_invites:
+      typeof data.can_create_invites === "boolean" ? data.can_create_invites : false,
   }
 }
 
@@ -137,4 +140,16 @@ export async function updateUsersRawJson(rawContent: string): Promise<void> {
       },
     },
   )
+}
+
+export async function updateUserFeatures(
+  userId: number,
+  features: { can_create_invites?: boolean }
+): Promise<AdminUser> {
+  const { parsed } = await adminFetch(`/api/admin/users/${userId}/features`, {
+    method: "PUT",
+    body: JSON.stringify(features),
+  })
+  const data = coerceRecord(parsed)
+  return normalizeUser(data)
 }

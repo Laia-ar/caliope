@@ -14,6 +14,7 @@ import {
   fetchAdminUsers,
   fetchUsersRawJson,
   updateUsersRawJson,
+  updateUserFeatures,
   type AdminStats,
   type AdminUser,
 } from "@/lib/admin"
@@ -45,6 +46,7 @@ export default function AdminPage() {
   const [isRawJsonSaving, setIsRawJsonSaving] = useState(false)
   const [editingUser, setEditingUser] = useState<EditableUser | null>(null)
   const [isUploading, setIsUploading] = useState(false)
+  const [togglingUserId, setTogglingUserId] = useState<number | null>(null)
 
   const statEntries = useMemo(() => {
     if (!stats) {
@@ -190,6 +192,25 @@ export default function AdminPage() {
     setEditingUser(null)
   }
 
+  const handleToggleCanInvite = async (user: AdminUser) => {
+    if (togglingUserId === user.id) return
+    setTogglingUserId(user.id)
+    try {
+      const updated = await updateUserFeatures(user.id, {
+        can_create_invites: !user.can_create_invites,
+      })
+      setUsers((prev) =>
+        prev.map((u) => (u.id === user.id ? { ...u, can_create_invites: updated.can_create_invites } : u))
+      )
+      toast.success(`Usuario ${updated.username} actualizado.`)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "No se pudo actualizar el usuario"
+      toast.error(message)
+    } finally {
+      setTogglingUserId(null)
+    }
+  }
+
   const renderContent = () => {
     if (loading) {
       return (
@@ -296,13 +317,14 @@ export default function AdminPage() {
                   <th className="px-4 py-3 text-left font-medium text-gray-600">Email</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-600">Nombre</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-600">Rol</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-600">Puede invitar</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-600">Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 bg-white">
                 {users.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-gray-500">
+                    <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
                       No hay usuarios para mostrar.
                     </td>
                   </tr>
@@ -313,6 +335,18 @@ export default function AdminPage() {
                       <td className="px-4 py-3 text-gray-600">{user.email || "—"}</td>
                       <td className="px-4 py-3 text-gray-600">{user.name || "—"}</td>
                       <td className="px-4 py-3 text-gray-600">{user.is_admin ? "Admin" : "Usuario"}</td>
+                      <td className="px-4 py-3">
+                        <label className="inline-flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 rounded border-gray-300 text-[#1862A2] focus:ring-[#1862A2]"
+                            checked={user.can_create_invites}
+                            onChange={() => handleToggleCanInvite(user)}
+                            disabled={togglingUserId === user.id}
+                          />
+                          <span className="text-gray-600">{user.can_create_invites ? "Sí" : "No"}</span>
+                        </label>
+                      </td>
                       <td className="px-4 py-3">
                         <div className="flex flex-wrap items-center gap-2">
                           <Button
