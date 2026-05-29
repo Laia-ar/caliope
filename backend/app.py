@@ -12,7 +12,10 @@ from sqlalchemy import event
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from extensions import db
-from models import init_db, User, Document, CustomPrompt
+from models import init_db, User, Document, CustomPrompt, ClassroomSession, SessionParticipant, SessionQuery
+import uuid
+import random
+import string
 from authlib.integrations.flask_client import OAuth
 from urllib.parse import urljoin, urlparse
 
@@ -25,6 +28,14 @@ def is_admin_user(username: str) -> bool:
     if not username:
         return False
     return username.lower() == ADMIN_USERNAME.lower()
+
+def require_teacher():
+    """Verify current user is authenticated and can create sessions."""
+    if not current_user.is_authenticated:
+        return jsonify({'message': 'Not authenticated'}), 401
+    if not current_user.can_create_sessions:
+        return jsonify({'message': 'Teacher access required'}), 403
+    return None
 
 def load_users_from_json():
     """Load users from users.json if it exists, otherwise return empty list."""
@@ -156,6 +167,24 @@ CORS(app, resources={
 
 # Initialize extensions
 db.init_app(app)
+
+def _run_migrations():
+    """Run lightweight schema migrations for SQLite."""
+    try:
+        from sqlalchemy import inspect, text
+        inspector = inspect(db.engine)
+        columns = [c['name'] for c in inspector.get_columns('users')]
+        if 'can_create_sessions' not in columns:
+            with db.engine.connect() as conn:
+                conn.execute(text("ALTER TABLE users ADD COLUMN can_create_sessions BOOLEAN DEFAULT 0"))
+                conn.commit()
+            app.logger.info("[Migration] Added can_create_sessions column to users")
+    except Exception as e:
+        app.logger.warning(f"[Migration] Skipped: {e}")
+
+with app.app_context():
+    _run_migrations()
+    db.create_all()
 
 # Enable SQLite WAL mode for better concurrent read/write performance
 @event.listens_for(Engine, "connect")
@@ -395,7 +424,9 @@ def check_auth():
             'id': user.id,
             'username': user.username,
             'email': user.email,
-            'name': user.name
+            'name': user.name,
+            'can_create_sessions': user.can_create_sessions,
+            'is_admin': is_admin_user(user.username)
         })
     else:
         return jsonify({'message': 'Not authenticated'}), 401
@@ -954,6 +985,275 @@ def query():
             "response_text": e.response.text if hasattr(e, 'response') else None
         }
         return jsonify(error_details), 500
+
+# ─── Classroom Sessions ───
+
+def _generate_access_code(length=6):
+    """Generate a random uppercase alphanumeric access code."""
+    while True:
+        code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=length))
+        if not ClassroomSession.query.filter_by(access_code=code).first():
+            return code
+
+@app.route('/api/sessions', methods=['POST'])
+@login_required
+def create_session():
+    error = require_teacher()
+    if error:
+        return error
+    data = request.get_json()
+    title = data.get('title', '').strip()
+    instructions = data.get('instructions', '').strip()
+    prompt_id = data.get('custom_prompt_id')
+    model_name = data.get('llm_model_name')
+    if not title:
+        return jsonify({'error': 'Title is required'}), 400
+    if not model_name:
+        return jsonify({'error': 'Model is required'}), 400
+    code = _generate_access_code()
+    session_obj = ClassroomSession(
+        teacher_id=current_user.id,
+        title=title,
+        instructions=instructions,
+        custom_prompt_id=prompt_id if prompt_id else None,
+        llm_model_name=model_name,
+        access_code=code,
+        is_active=True
+    )
+    db.session.add(session_obj)
+    db.session.commit()
+    return jsonify({
+        'id': session_obj.id,
+        'title': session_obj.title,
+        'access_code': session_obj.access_code,
+        'is_active': session_obj.is_active,
+        'created_at': session_obj.created_at.isoformat()
+    }), 201
+
+@app.route('/api/sessions', methods=['GET'])
+@login_required
+def list_sessions():
+    error = require_teacher()
+    if error:
+        return error
+    sessions = ClassroomSession.query.filter_by(teacher_id=current_user.id).order_by(ClassroomSession.created_at.desc()).all()
+    return jsonify({
+        'sessions': [{
+            'id': s.id,
+            'title': s.title,
+            'access_code': s.access_code,
+            'is_active': s.is_active,
+            'llm_model_name': s.llm_model_name,
+            'created_at': s.created_at.isoformat()
+        } for s in sessions]
+    })
+
+@app.route('/api/sessions/<int:session_id>', methods=['GET'])
+@login_required
+def get_session(session_id):
+    error = require_teacher()
+    if error:
+        return error
+    s = ClassroomSession.query.filter_by(id=session_id, teacher_id=current_user.id).first_or_404()
+    prompt = None
+    if s.custom_prompt_id:
+        p = CustomPrompt.query.get(s.custom_prompt_id)
+        if p:
+            prompt = {'id': p.id, 'name': p.name, 'content': p.content}
+    return jsonify({
+        'id': s.id,
+        'title': s.title,
+        'instructions': s.instructions,
+        'access_code': s.access_code,
+        'is_active': s.is_active,
+        'llm_model_name': s.llm_model_name,
+        'prompt': prompt,
+        'created_at': s.created_at.isoformat(),
+        'updated_at': s.updated_at.isoformat()
+    })
+
+@app.route('/api/sessions/<int:session_id>', methods=['PUT'])
+@login_required
+def update_session(session_id):
+    error = require_teacher()
+    if error:
+        return error
+    s = ClassroomSession.query.filter_by(id=session_id, teacher_id=current_user.id).first_or_404()
+    data = request.get_json()
+    s.title = data.get('title', s.title)
+    s.instructions = data.get('instructions', s.instructions)
+    s.custom_prompt_id = data.get('custom_prompt_id', s.custom_prompt_id)
+    s.llm_model_name = data.get('llm_model_name', s.llm_model_name)
+    if 'is_active' in data:
+        s.is_active = bool(data['is_active'])
+    db.session.commit()
+    return jsonify({
+        'id': s.id,
+        'title': s.title,
+        'instructions': s.instructions,
+        'is_active': s.is_active,
+        'llm_model_name': s.llm_model_name,
+        'updated_at': s.updated_at.isoformat()
+    })
+
+@app.route('/api/sessions/<int:session_id>', methods=['DELETE'])
+@login_required
+def delete_session(session_id):
+    error = require_teacher()
+    if error:
+        return error
+    s = ClassroomSession.query.filter_by(id=session_id, teacher_id=current_user.id).first_or_404()
+    db.session.delete(s)
+    db.session.commit()
+    return '', 204
+
+@app.route('/api/sessions/<int:session_id>/queries', methods=['GET'])
+@login_required
+def get_session_queries(session_id):
+    error = require_teacher()
+    if error:
+        return error
+    s = ClassroomSession.query.filter_by(id=session_id, teacher_id=current_user.id).first_or_404()
+    queries = SessionQuery.query.filter_by(session_id=s.id).order_by(SessionQuery.created_at.desc()).all()
+    result = []
+    for q in queries:
+        participant_name = None
+        if q.participant_id:
+            participant = SessionParticipant.query.get(q.participant_id)
+            if participant:
+                participant_name = participant.display_name or 'Anónimo'
+        result.append({
+            'id': q.id,
+            'query_text': q.query_text,
+            'response_text': q.response_text,
+            'participant_name': participant_name,
+            'created_at': q.created_at.isoformat()
+        })
+    return jsonify({'queries': result})
+
+@app.route('/api/sessions/join', methods=['POST'])
+def join_session():
+    data = request.get_json()
+    code = data.get('access_code', '').strip().upper()
+    display_name = data.get('display_name', '').strip() or None
+    if not code:
+        return jsonify({'error': 'Access code is required'}), 400
+    s = ClassroomSession.query.filter_by(access_code=code, is_active=True).first()
+    if not s:
+        return jsonify({'error': 'Invalid or inactive session code'}), 404
+    token = str(uuid.uuid4())
+    participant = SessionParticipant(
+        session_id=s.id,
+        display_name=display_name,
+        token=token
+    )
+    db.session.add(participant)
+    db.session.commit()
+    prompt = None
+    if s.custom_prompt_id:
+        p = CustomPrompt.query.get(s.custom_prompt_id)
+        if p:
+            prompt = {'id': p.id, 'name': p.name, 'content': p.content}
+    return jsonify({
+        'session': {
+            'id': s.id,
+            'title': s.title,
+            'instructions': s.instructions,
+            'llm_model_name': s.llm_model_name,
+            'prompt': prompt
+        },
+        'participant_token': token
+    })
+
+@app.route('/api/sessions/by-code/<code>', methods=['GET'])
+def get_session_by_code(code):
+    s = ClassroomSession.query.filter_by(access_code=code.upper(), is_active=True).first()
+    if not s:
+        return jsonify({'error': 'Session not found'}), 404
+    prompt = None
+    if s.custom_prompt_id:
+        p = CustomPrompt.query.get(s.custom_prompt_id)
+        if p:
+            prompt = {'id': p.id, 'name': p.name, 'content': p.content}
+    return jsonify({
+        'id': s.id,
+        'title': s.title,
+        'instructions': s.instructions,
+        'llm_model_name': s.llm_model_name,
+        'prompt': prompt
+    })
+
+@app.route('/api/sessions/<int:session_id>/query', methods=['POST'])
+def session_query(session_id):
+    data = request.get_json()
+    text = data.get('text', '').strip()
+    token = request.headers.get('X-Participant-Token', '')
+    if not text:
+        return jsonify({'error': 'Text is required'}), 400
+    if not token:
+        return jsonify({'error': 'Participant token is required'}), 401
+    participant = SessionParticipant.query.filter_by(token=token, session_id=session_id).first()
+    if not participant:
+        return jsonify({'error': 'Invalid participant token'}), 401
+    s = ClassroomSession.query.get(session_id)
+    if not s or not s.is_active:
+        return jsonify({'error': 'Session not found or inactive'}), 404
+    customprompt = None
+    if s.custom_prompt_id:
+        customprompt = CustomPrompt.query.get(s.custom_prompt_id)
+    customprompt_content = customprompt.content if customprompt else "No custom prompt selected"
+    openrouter_api_key = os.getenv('OPENROUTER_API_KEY')
+    headers = {
+        "Authorization": f"Bearer {openrouter_api_key}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": os.getenv('FRONTEND_URL', 'http://127.0.0.1:3000'),
+        "X-Title": "Caliope Markdown Editor"
+    }
+    payload = {
+        "model": s.llm_model_name,
+        "messages": [
+            {"role": "system", "content": "Eres un generador de preguntas. Generas exactamente 3 preguntas. No incluyas nada más que las preguntas separadas por un salto de linea, sin explicaciones ni contenido adicional. A continuación recibirás instrucciones sobre el rol que debes adoptar para hacer las preguntas."},
+            {"role": "system", "content": customprompt_content},
+            {"role": "user", "content": text}
+        ]
+    }
+    try:
+        response = requests.post("https://openrouter.ai/api/v1/chat/completions",
+                                headers=headers, json=payload, timeout=30)
+        response.raise_for_status()
+        response_data = response.json()
+        message = response_data['choices'][0]['message']['content']
+        query_record = SessionQuery(
+            session_id=s.id,
+            participant_id=participant.id,
+            query_text=text,
+            response_text=message
+        )
+        db.session.add(query_record)
+        db.session.commit()
+        return jsonify({"message": message})
+    except requests.exceptions.RequestException as e:
+        error_details = {
+            "error": str(e),
+            "status_code": e.response.status_code if hasattr(e, 'response') else None,
+            "response_text": e.response.text if hasattr(e, 'response') else None
+        }
+        return jsonify(error_details), 500
+
+@app.route('/api/admin/users/<int:user_id>/teacher-status', methods=['PUT'])
+@login_required
+def update_teacher_status(user_id):
+    if not is_admin_user(current_user.username):
+        return jsonify({'error': 'Admin access required'}), 403
+    data = request.get_json()
+    user = User.query.get_or_404(user_id)
+    user.can_create_sessions = bool(data.get('can_create_sessions', False))
+    db.session.commit()
+    return jsonify({
+        'id': user.id,
+        'username': user.username,
+        'can_create_sessions': user.can_create_sessions
+    })
 
 # Global error handler for 500 errors
 @app.errorhandler(500)

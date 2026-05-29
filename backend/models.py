@@ -12,6 +12,7 @@ class User(db.Model, UserMixin):
     email = db.Column(db.String(100), unique=True, nullable=False)
     name = db.Column(db.String(100), nullable=False)
     password_hash = db.Column(db.String(128))
+    can_create_sessions = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def set_password(self, password):
@@ -22,6 +23,7 @@ class User(db.Model, UserMixin):
     
     documents = db.relationship('Document', backref='author', lazy=True)
     prompts = db.relationship('CustomPrompt', backref='author', lazy=True)
+    sessions = db.relationship('ClassroomSession', backref='teacher', lazy=True)
 
 class Document(db.Model):
     __tablename__ = 'documents'
@@ -53,6 +55,46 @@ class Query(db.Model):
     query_text = db.Column(db.Text, nullable=False)
     custom_prompt_id = db.Column(db.Integer, db.ForeignKey('custom_prompts.id'), nullable=True)
     llm_model_name = db.Column(db.String(100), nullable=False)
+    response_text = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class ClassroomSession(db.Model):
+    __tablename__ = 'classroom_sessions'
+
+    id = db.Column(db.Integer, primary_key=True)
+    teacher_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    title = db.Column(db.String(200), nullable=False)
+    instructions = db.Column(db.Text, nullable=False, default='')
+    custom_prompt_id = db.Column(db.Integer, db.ForeignKey('custom_prompts.id'), nullable=True)
+    llm_model_name = db.Column(db.String(100), nullable=False)
+    access_code = db.Column(db.String(10), unique=True, nullable=False, index=True)
+    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    teacher = db.relationship('User', back_populates='sessions')
+    prompt = db.relationship('CustomPrompt', lazy=True)
+    participants = db.relationship('SessionParticipant', backref='session', lazy=True, cascade='all, delete-orphan')
+    queries = db.relationship('SessionQuery', backref='session', lazy=True, cascade='all, delete-orphan')
+
+class SessionParticipant(db.Model):
+    __tablename__ = 'session_participants'
+
+    id = db.Column(db.Integer, primary_key=True)
+    session_id = db.Column(db.Integer, db.ForeignKey('classroom_sessions.id'), nullable=False)
+    display_name = db.Column(db.String(100), nullable=True)
+    token = db.Column(db.String(36), unique=True, nullable=False)
+    joined_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    queries = db.relationship('SessionQuery', backref='participant', lazy=True)
+
+class SessionQuery(db.Model):
+    __tablename__ = 'session_queries'
+
+    id = db.Column(db.Integer, primary_key=True)
+    session_id = db.Column(db.Integer, db.ForeignKey('classroom_sessions.id'), nullable=False)
+    participant_id = db.Column(db.Integer, db.ForeignKey('session_participants.id'), nullable=True)
+    query_text = db.Column(db.Text, nullable=False)
     response_text = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
