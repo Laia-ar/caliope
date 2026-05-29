@@ -14,6 +14,7 @@ import {
   fetchAdminUsers,
   fetchUsersRawJson,
   updateUsersRawJson,
+  updateTeacherStatus,
   type AdminStats,
   type AdminUser,
 } from "@/lib/admin"
@@ -45,6 +46,7 @@ export default function AdminPage() {
   const [isRawJsonSaving, setIsRawJsonSaving] = useState(false)
   const [editingUser, setEditingUser] = useState<EditableUser | null>(null)
   const [isUploading, setIsUploading] = useState(false)
+  const [togglingTeacherId, setTogglingTeacherId] = useState<number | null>(null)
 
   const statEntries = useMemo(() => {
     if (!stats) {
@@ -190,6 +192,27 @@ export default function AdminPage() {
     setEditingUser(null)
   }
 
+  const handleToggleTeacher = async (user: AdminUser) => {
+    setTogglingTeacherId(user.id)
+    try {
+      await updateTeacherStatus(user.id, !user.can_create_sessions)
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.id === user.id ? { ...u, can_create_sessions: !user.can_create_sessions } : u
+        )
+      )
+      toast.success(
+        user.can_create_sessions
+          ? "Se quitó el rol de docente"
+          : "Se asignó el rol de docente"
+      )
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "No se pudo actualizar el rol")
+    } finally {
+      setTogglingTeacherId(null)
+    }
+  }
+
   const renderContent = () => {
     if (loading) {
       return (
@@ -296,13 +319,14 @@ export default function AdminPage() {
                   <th className="px-4 py-3 text-left font-medium text-gray-600">Email</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-600">Nombre</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-600">Rol</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-600">Docente</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-600">Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 bg-white">
                 {users.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-gray-500">
+                    <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
                       No hay usuarios para mostrar.
                     </td>
                   </tr>
@@ -313,6 +337,16 @@ export default function AdminPage() {
                       <td className="px-4 py-3 text-gray-600">{user.email || "—"}</td>
                       <td className="px-4 py-3 text-gray-600">{user.name || "—"}</td>
                       <td className="px-4 py-3 text-gray-600">{user.is_admin ? "Admin" : "Usuario"}</td>
+                      <td className="px-4 py-3">
+                        <Button
+                          variant={user.can_create_sessions ? "default" : "outline"}
+                          size="sm"
+                          disabled={togglingTeacherId === user.id}
+                          onClick={() => handleToggleTeacher(user)}
+                        >
+                          {user.can_create_sessions ? "Sí" : "No"}
+                        </Button>
+                      </td>
                       <td className="px-4 py-3">
                         <div className="flex flex-wrap items-center gap-2">
                           <Button
