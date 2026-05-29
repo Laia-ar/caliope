@@ -27,6 +27,8 @@ import {
   History,
   Loader2,
   HelpCircle,
+  Crosshair,
+  X,
 } from "lucide-react";
 import { CreatePromptModal } from "./create-prompt-modal";
 import { EditPromptForm } from "./edit-prompt-form";
@@ -50,6 +52,7 @@ interface QueryHistoryItem {
   model_used: string;
   created_at: string;
   document_id: string | null;
+  focused_passage?: string | null;
   questions?: Question[];
 }
 
@@ -58,6 +61,8 @@ interface InspirationPanelProps {
   documentId?: string;
   initialPromptId?: string | null;
   onQuestionsGenerated?: (questions: Question[]) => void;
+  focusedPassage?: string | null;
+  onClearFocus?: () => void;
 }
 
 export function InspirationPanel({
@@ -65,6 +70,8 @@ export function InspirationPanel({
   documentId,
   initialPromptId,
   onQuestionsGenerated,
+  focusedPassage,
+  onClearFocus,
 }: InspirationPanelProps) {
   const router = useRouter();
   const [prompts, setPrompts] = useState<Prompt[]>([]);
@@ -161,6 +168,7 @@ export function InspirationPanel({
       customprompt: promptIdNumber,
       llm_model_name: selectedModel,
       document_id: documentId ?? undefined,
+      focused_passage: focusedPassage ?? undefined,
     };
 
     try {
@@ -310,6 +318,7 @@ export function InspirationPanel({
             item?.llm_model_name ?? item?.model_used ?? "Modelo desconocido",
           created_at: item?.created_at ?? new Date().toISOString(),
           document_id: item?.document_id ? String(item.document_id) : null,
+          focused_passage: item?.focused_passage ?? null,
           questions: questionItems,
         };
       });
@@ -668,6 +677,24 @@ export function InspirationPanel({
             </Button>
           </div>
         </div>
+
+        {focusedPassage && (
+          <div className="mt-3 animate-in fade-in slide-in-from-bottom-2 duration-300">
+            <div className="inline-flex items-center gap-2 bg-amber-50 text-amber-800 border border-amber-200 rounded-full px-3 py-1.5 text-sm font-sans">
+              <Crosshair className="w-3.5 h-3.5 text-amber-600" />
+              <span className="truncate max-w-[300px]">
+                Foco: &ldquo;{focusedPassage.length > 60 ? focusedPassage.slice(0, 60) + "…" : focusedPassage}&rdquo;
+              </span>
+              <button
+                onClick={onClearFocus}
+                className="ml-1 p-0.5 hover:bg-amber-100 rounded-full transition-colors"
+                title="Quitar foco"
+              >
+                <X className="w-3.5 h-3.5 text-amber-600" />
+              </button>
+            </div>
+          </div>
+        )}
 
         {selectedPrompt && questions.length === 0 && !isLoading && (
           <div className="text-center py-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
