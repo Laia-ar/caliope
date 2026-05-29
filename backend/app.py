@@ -540,7 +540,8 @@ def admin_users():
             'username': user.username,
             'email': user.email,
             'name': user.name,
-            'is_admin': is_admin_user(user.username)
+            'is_admin': is_admin_user(user.username),
+            'can_create_sessions': user.can_create_sessions
         } for user in users]
     })
 

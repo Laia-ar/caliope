@@ -23,7 +23,7 @@ class User(db.Model, UserMixin):
     
     documents = db.relationship('Document', backref='author', lazy=True)
     prompts = db.relationship('CustomPrompt', backref='author', lazy=True)
-    sessions = db.relationship('ClassroomSession', backref='teacher', lazy=True)
+    sessions = db.relationship('ClassroomSession', back_populates='teacher', lazy=True)
 
 class Document(db.Model):
     __tablename__ = 'documents'
