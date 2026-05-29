@@ -5,18 +5,21 @@ import React from "react"
 import { useEditor, EditorContent, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit"
 import { Button } from "@/components/ui/button"
-import { Bold, Italic, List, ListOrdered, Quote, Undo, Redo, LinkIcon } from "lucide-react"
+import { Bold, Italic, List, ListOrdered, Quote, Undo, Redo, LinkIcon, Crosshair, X } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useState, useEffect, useCallback, useMemo } from "react"
+import { FocusPassage } from "./tiptap-focus-mark"
 
 interface TipTapEditorProps {
   onContentChange?: (content: string) => void
   initialContent?: string
+  onFocusPassageChange?: (passage: string | null) => void
 }
 
-export const TipTapEditor = React.memo(function TipTapEditor({ onContentChange, initialContent }: TipTapEditorProps) {
+export const TipTapEditor = React.memo(function TipTapEditor({ onContentChange, initialContent, onFocusPassageChange }: TipTapEditorProps) {
   const [showLinkDialog, setShowLinkDialog] = useState(false)
   const [linkUrl, setLinkUrl] = useState("")
+  const [focusPassage, setFocusPassage] = useState<string | null>(null)
 
   const debouncedOnContentChange = useCallback(
     debounce((content: string) => {
@@ -36,6 +39,7 @@ export const TipTapEditor = React.memo(function TipTapEditor({ onContentChange, 
             },
           },
         }),
+        FocusPassage,
       ],
       content: initialContent || "<p></p>",
       editorProps: {
@@ -47,9 +51,22 @@ export const TipTapEditor = React.memo(function TipTapEditor({ onContentChange, 
       onUpdate: ({ editor }: { editor: Editor }) => {
         const html = editor.getHTML();
         debouncedOnContentChange(html);
+
+        // Check if focus passage mark still exists in the document
+        let hasFocusMark = false;
+        editor.state.doc.descendants((node) => {
+          if (node.marks.some((mark) => mark.type.name === "focusPassage")) {
+            hasFocusMark = true;
+            return false;
+          }
+        });
+        if (!hasFocusMark && focusPassage !== null) {
+          setFocusPassage(null);
+          onFocusPassageChange?.(null);
+        }
       },
     }),
-    [initialContent, debouncedOnContentChange]
+    [initialContent, debouncedOnContentChange, focusPassage, onFocusPassageChange]
   );
 
   const editor = useEditor(editorConfig)
@@ -128,6 +145,31 @@ export const TipTapEditor = React.memo(function TipTapEditor({ onContentChange, 
     editor?.chain().focus().redo().run()
   }, [editor])
 
+  const handleSetFocus = useCallback(() => {
+    if (!editor) return
+    const { from, to, empty } = editor.state.selection
+    if (empty) return
+
+    // Apply the focus mark to the selection
+    editor.chain().focus().setMark("focusPassage").run()
+
+    // Extract plain text from the selection
+    const selectedText = editor.state.doc.textBetween(from, to, " ")
+    setFocusPassage(selectedText)
+    onFocusPassageChange?.(selectedText)
+  }, [editor, onFocusPassageChange])
+
+  const handleClearFocus = useCallback(() => {
+    if (!editor) return
+    editor.chain().focus().unsetMark("focusPassage").run()
+    // Also remove mark from entire document to be safe
+    editor.commands.selectAll()
+    editor.chain().unsetMark("focusPassage").run()
+    editor.commands.focus("end")
+    setFocusPassage(null)
+    onFocusPassageChange?.(null)
+  }, [editor, onFocusPassageChange])
+
   if (!editor) {
     return null
   }
@@ -205,6 +247,32 @@ export const TipTapEditor = React.memo(function TipTapEditor({ onContentChange, 
         >
           <LinkIcon className="w-4 h-4" />
         </Button>
+
+        <div className="w-px h-6 bg-border mx-2" />
+
+        {/* Focus Buttons */}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleSetFocus}
+          disabled={editor.state.selection.empty}
+          className={focusPassage ? "bg-amber-100 text-amber-700" : ""}
+          title="Seleccionar pasaje enfocado"
+        >
+          <Crosshair className="w-4 h-4" />
+        </Button>
+
+        {focusPassage && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleClearFocus}
+            className="text-red-600 hover:text-red-700 hover:bg-red-50"
+            title="Quitar foco"
+          >
+            <X className="w-4 h-4" />
+          </Button>
+        )}
 
         <div className="w-px h-6 bg-border mx-2" />
 

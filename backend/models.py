@@ -71,6 +71,7 @@ class Query(db.Model):
     custom_prompt_id = db.Column(db.Integer, db.ForeignKey('custom_prompts.id'), nullable=True)
     llm_model_name = db.Column(db.String(100), nullable=False)
     response_text = db.Column(db.Text, nullable=True)
+    focused_passage = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 def init_db():

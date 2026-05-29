@@ -24,6 +24,7 @@ export default function EditDocumentPage() {
   const [error, setError] = useState<string | null>(null)
   const [documentContent, setDocumentContent] = useState("")
   const [isSaving, setIsSaving] = useState(false)
+  const [focusedPassage, setFocusedPassage] = useState<string | null>(null)
 
   const [lastSavedTitle, setLastSavedTitle] = useState("");
   const [lastSavedContent, setLastSavedContent] = useState("");
@@ -227,12 +228,18 @@ export default function EditDocumentPage() {
               onQuestionsGenerated={(questions) => {
                 console.log("[v0] Generated questions:", questions)
               }}
+              focusedPassage={focusedPassage}
+              onClearFocus={() => setFocusedPassage(null)}
             />
           </div>
 
           {/* Editor Container */}
           <div className="flex-1 min-h-[40dvh]">
-            <TipTapEditor initialContent={document?.content} onContentChange={handleContentChange} />
+            <TipTapEditor
+              initialContent={document?.content}
+              onContentChange={handleContentChange}
+              onFocusPassageChange={setFocusedPassage}
+            />
           </div>
         </div>
       </div>

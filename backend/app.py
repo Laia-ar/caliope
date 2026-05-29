@@ -915,7 +915,8 @@ def get_query_history():
             'response_text': query.response_text,
             'llm_model_name': query.llm_model_name,
             'created_at': query.created_at.isoformat(),
-            'document_id': query.document_id
+            'document_id': query.document_id,
+            'focused_passage': query.focused_passage
         } for query in queries]
     })
 
@@ -927,6 +928,7 @@ def query():
     customprompt_id = data.get('customprompt')
     llm_model_name = data.get('llm_model_name')
     document_id = data.get('document_id')
+    focused_passage = data.get('focused_passage')
     
     customprompt = None
     if customprompt_id:
@@ -950,12 +952,24 @@ def query():
         "X-Title": "Caliope Markdown Editor"
     }
     
+    # Build user content with optional focused passage
+    if focused_passage:
+        user_content = f"""A continuación recibís un texto completo y un pasaje específico sobre el que debés concentrarte especialmente.
+
+TEXTO COMPLETO:
+{text}
+
+PASAJE ENFOCADO (prestá especial atención a este fragmento):
+{focused_passage}"""
+    else:
+        user_content = text
+
     payload = {
             "model": llm_model_name,
             "messages": [
                 {"role": "system", "content": "Eres un generador de preguntas. Generas exactamente 3 preguntas. No incluyas nada más que las preguntas separadas por un salto de linea, sin explicaciones ni contenido adicional. A continuación recibirás instrucciones sobre el rol que debes adoptar para hacer las preguntas."},
                 {"role": "system", "content": customprompt_content},
-                {"role": "user", "content": text}
+                {"role": "user", "content": user_content}
             ]
         }
     logging.debug(f"Payload: {payload}")
@@ -984,7 +998,8 @@ def query():
             query_text=text,
             custom_prompt_id=customprompt_id if customprompt_id else None,
             llm_model_name=llm_model_name,
-            response_text=message
+            response_text=message,
+            focused_passage=focused_passage if focused_passage else None
         )
         
         db.session.add(query_record)
