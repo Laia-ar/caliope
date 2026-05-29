@@ -380,6 +380,10 @@ def logout():
 
     return _clear_session_cookies(response)
 
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    return jsonify({'status': 'ok'}), 200
+
 @app.route('/api/check-auth', methods=['GET'])
 def check_auth():
     user = current_user
