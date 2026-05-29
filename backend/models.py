@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from werkzeug.security import generate_password_hash, check_password_hash
 from extensions import db
 from flask_login import UserMixin
@@ -13,6 +13,9 @@ class User(db.Model, UserMixin):
     name = db.Column(db.String(100), nullable=False)
     password_hash = db.Column(db.String(128))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    can_create_invites = db.Column(db.Boolean, default=False)
+    trial_expires_at = db.Column(db.DateTime, nullable=True)
+    is_disabled = db.Column(db.Boolean, default=False)
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -22,6 +25,20 @@ class User(db.Model, UserMixin):
     
     documents = db.relationship('Document', backref='author', lazy=True)
     prompts = db.relationship('CustomPrompt', backref='author', lazy=True)
+    invitation_links = db.relationship('InvitationLink', foreign_keys='InvitationLink.created_by_id', backref='creator', lazy=True)
+
+class InvitationLink(db.Model):
+    __tablename__ = 'invitation_links'
+
+    id = db.Column(db.Integer, primary_key=True)
+    token = db.Column(db.String(64), unique=True, nullable=False, index=True)
+    created_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    used_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    used_at = db.Column(db.DateTime, nullable=True)
+    expires_at = db.Column(db.DateTime, default=lambda: datetime.utcnow() + timedelta(days=7))
+
+    used_by = db.relationship('User', foreign_keys=[used_by_id], backref='used_invitation', uselist=False)
 
 class Document(db.Model):
     __tablename__ = 'documents'
