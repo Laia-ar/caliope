@@ -20,6 +20,7 @@ export const TipTapEditor = React.memo(function TipTapEditor({ onContentChange, 
   const [showLinkDialog, setShowLinkDialog] = useState(false)
   const [linkUrl, setLinkUrl] = useState("")
   const [focusPassage, setFocusPassage] = useState<string | null>(null)
+  const [isSelectionEmpty, setIsSelectionEmpty] = useState(true)
 
   const debouncedOnContentChange = useCallback(
     debounce((content: string) => {
@@ -64,6 +65,9 @@ export const TipTapEditor = React.memo(function TipTapEditor({ onContentChange, 
           setFocusPassage(null);
           onFocusPassageChange?.(null);
         }
+      },
+      onSelectionUpdate: ({ editor }: { editor: Editor }) => {
+        setIsSelectionEmpty(editor.state.selection.empty)
       },
     }),
     [initialContent, debouncedOnContentChange, focusPassage, onFocusPassageChange]
@@ -255,7 +259,7 @@ export const TipTapEditor = React.memo(function TipTapEditor({ onContentChange, 
           variant="ghost"
           size="sm"
           onClick={handleSetFocus}
-          disabled={editor.state.selection.empty}
+          disabled={isSelectionEmpty}
           className={focusPassage ? "bg-amber-100 text-amber-700" : ""}
           title="Seleccionar pasaje enfocado"
         >
