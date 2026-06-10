@@ -3,12 +3,10 @@
 import { useEffect, useState, useCallback } from "react"
 import { useParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Loader2, Send, Sparkles, User } from "lucide-react"
+import { TipTapEditor } from "@/components/tiptap-editor"
 import { toast } from "sonner"
+import { Send, Loader2, Sparkles, BookOpen } from "lucide-react"
 import {
   getSessionByCode,
   joinSession,
@@ -36,7 +34,7 @@ export default function StudentSessionPage() {
   const [token, setToken] = useState<string>("")
   const [displayName, setDisplayName] = useState("")
   const [joining, setJoining] = useState(false)
-  const [queryText, setQueryText] = useState("")
+  const [editorContent, setEditorContent] = useState("")
   const [sending, setSending] = useState(false)
   const [messages, setMessages] = useState<ChatMessage[]>([])
 
@@ -75,22 +73,21 @@ export default function StudentSessionPage() {
     }
   }
 
-  const handleSend = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!queryText.trim() || !session) return
+  const handleSend = async () => {
+    if (!editorContent.trim() || !session) return
     try {
       setSending(true)
-      const result = await sendSessionQuery(session.id, token, queryText.trim())
+      const result = await sendSessionQuery(session.id, token, editorContent.trim())
       setMessages((prev) => [
         {
           id: Date.now(),
-          query_text: queryText.trim(),
+          query_text: editorContent.trim(),
           response_text: result.message,
           created_at: new Date().toISOString(),
         },
         ...prev,
       ])
-      setQueryText("")
+      setEditorContent("")
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "No se pudo enviar la consulta")
     } finally {
@@ -100,7 +97,7 @@ export default function StudentSessionPage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
+      <div className="flex h-screen items-center justify-center bg-gray-50">
         <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
       </div>
     )
@@ -108,7 +105,7 @@ export default function StudentSessionPage() {
 
   if (!session) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-4">
+      <div className="flex h-screen flex-col items-center justify-center gap-4 bg-gray-50">
         <p className="text-gray-600">Sesión no encontrada o inactiva.</p>
       </div>
     )
@@ -116,7 +113,7 @@ export default function StudentSessionPage() {
 
   if (!token) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center bg-gray-50 p-4">
+      <div className="flex h-screen flex-col items-center justify-center bg-gray-50 p-4">
         <div className="w-full max-w-md">
           <h1 className="text-center text-2xl font-semibold text-gray-900">
             {session.title}
@@ -126,21 +123,23 @@ export default function StudentSessionPage() {
           </p>
           <form onSubmit={handleJoin} className="mt-6 space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="name">Tu nombre (opcional)</Label>
-              <Input
+              <label htmlFor="name" className="block text-sm font-medium text-gray-700">
+                Tu nombre (opcional)
+              </label>
+              <input
                 id="name"
                 placeholder="Ej: Juan"
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-4 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
             <Button type="submit" className="w-full" disabled={joining}>
               {joining ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               ) : (
-                <User className="mr-2 h-4 w-4" />
+                "Unirse a la sesión"
               )}
-              Unirse a la sesión
             </Button>
           </form>
         </div>
@@ -149,85 +148,91 @@ export default function StudentSessionPage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col bg-gray-50">
-      {/* Header */}
-      <header className="border-b border-gray-200 bg-white px-4 py-4 sm:px-6">
-        <div className="mx-auto flex max-w-3xl items-center justify-between">
-          <div>
-            <h1 className="text-lg font-semibold text-gray-900">{session.title}</h1>
-            <div className="mt-1 flex items-center gap-2 text-xs text-gray-500">
-              <Badge variant="outline">{session.llm_model_name}</Badge>
-              {session.prompt && (
-                <Badge variant="secondary">{session.prompt.name}</Badge>
+    <div className="flex h-screen bg-gray-50">
+      {/* Main content area styled like /write */}
+      <main className="flex-1 flex flex-col h-screen">
+        <div className="h-dvh flex flex-col m-4 bg-white rounded-lg shadow-lg overflow-hidden">
+          {/* Header */}
+          <header className="px-6 py-4 flex items-center justify-between sticky top-0 bg-white z-10 border-b border-gray-100">
+            <div className="flex-1">
+              <h1 className="text-xl font-medium text-gray-900">{session.title}</h1>
+              <div className="mt-1 flex items-center gap-2">
+                <Badge variant="outline" className="font-mono text-xs">
+                  {session.llm_model_name}
+                </Badge>
+                {session.prompt && (
+                  <Badge variant="secondary" className="text-xs">
+                    {session.prompt.name}
+                  </Badge>
+                )}
+              </div>
+            </div>
+            <Button
+              size="sm"
+              onClick={handleSend}
+              disabled={sending || !editorContent.trim()}
+              className="btn-radius"
+            >
+              {sending ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Send className="mr-2 h-4 w-4" />
               )}
+              Preguntar
+            </Button>
+          </header>
+
+          {/* Scrollable area */}
+          <div className="flex-1 min-h-0 overflow-y-auto">
+            {/* Instructions banner */}
+            {session.instructions && (
+              <div className="px-6 pt-4">
+                <div className="rounded-lg bg-blue-50 border border-blue-100 p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <BookOpen className="h-4 w-4 text-blue-600" />
+                    <span className="text-sm font-medium text-blue-800">Consigna</span>
+                  </div>
+                  <p className="text-sm text-blue-900 whitespace-pre-wrap">
+                    {session.instructions}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Previous messages */}
+            {messages.length > 0 && (
+              <div className="px-6 pt-4 space-y-4">
+                {messages.map((msg) => (
+                  <div
+                    key={msg.id}
+                    className="rounded-lg border border-gray-100 bg-gray-50/50 p-4"
+                  >
+                    <div className="flex items-center gap-2 mb-2">
+                      <Sparkles className="h-4 w-4 text-yellow-500" />
+                      <span className="text-xs font-medium text-gray-500">
+                        {new Date(msg.created_at).toLocaleTimeString()}
+                      </span>
+                    </div>
+                    <div
+                      className="prose prose-sm max-w-none text-gray-700"
+                      dangerouslySetInnerHTML={{ __html: msg.response_text.replace(/\n/g, "<br/>") }}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Editor container */}
+            <div className="px-6 py-4">
+              <div className="flex-1 min-h-[40dvh]">
+                <TipTapEditor
+                  initialContent={editorContent}
+                  onContentChange={setEditorContent}
+                />
+              </div>
             </div>
           </div>
         </div>
-      </header>
-
-      <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-6 sm:px-6">
-        {/* Instructions */}
-        {session.instructions && (
-          <Card className="mb-6 border-blue-100 bg-blue-50/50">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-blue-800">
-                Consigna
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="whitespace-pre-wrap text-sm text-blue-900">
-                {session.instructions}
-              </p>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Chat / Input */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-sm font-medium text-gray-700">
-              <Sparkles className="h-4 w-4 text-yellow-500" />
-              Escribí tu texto y pedí preguntas
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSend} className="flex gap-2">
-              <Input
-                placeholder="Pegá o escribí tu texto aquí..."
-                value={queryText}
-                onChange={(e) => setQueryText(e.target.value)}
-                disabled={sending}
-              />
-              <Button type="submit" disabled={sending || !queryText.trim()}>
-                {sending ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Send className="h-4 w-4" />
-                )}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
-
-        {/* Messages */}
-        {messages.length > 0 && (
-          <div className="mt-6 space-y-4">
-            {messages.map((msg) => (
-              <div
-                key={msg.id}
-                className="rounded-lg border border-gray-100 bg-white p-4 shadow-sm"
-              >
-                <p className="text-sm font-medium text-gray-900">{msg.query_text}</p>
-                <div className="mt-2 rounded bg-gray-50 p-3 text-sm text-gray-700 whitespace-pre-line">
-                  {msg.response_text}
-                </div>
-                <p className="mt-2 text-right text-xs text-gray-400">
-                  {new Date(msg.created_at).toLocaleTimeString()}
-                </p>
-              </div>
-            ))}
-          </div>
-        )}
       </main>
     </div>
   )
