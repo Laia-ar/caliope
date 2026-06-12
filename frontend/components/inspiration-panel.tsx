@@ -32,6 +32,7 @@ import { CreatePromptModal } from "./create-prompt-modal";
 import { EditPromptForm } from "./edit-prompt-form";
 import Image from "next/image";
 import { loadPrompts, savePrompt, getPrompt, type Prompt } from "@/lib/prompts";
+import { loadAvailableModels, type AvailableModel } from "@/lib/models-api";
 import { buildBackendUrl } from "@/lib/backend";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -69,18 +70,8 @@ export function InspirationPanel({
   const router = useRouter();
   const [prompts, setPrompts] = useState<Prompt[]>([]);
   const [selectedPrompt, setSelectedPrompt] = useState<string>("");
-  const MODEL_OPTIONS = [
-    { value: "google/gemini-2.0-flash-001", label: "Google Gemini" },
-    { value: "mistralai/mistral-nemo", label: "Mistral Nemo" },
-    { value: "deepseek/deepseek-chat-v3-0324", label: "DeepSeek" },
-    { value: "qwen/qwen-2.5-7b-instruct", label: "Qwen 2.5 7B" },
-    { value: "meta-llama/llama-3.3-70b-instruct", label: "Llama 3.3 70B" },
-    { value: "openai/gpt-4o-mini", label: "GPT-4o Mini" },
-  ] as const;
-
-  const [selectedModel, setSelectedModel] = useState<
-    (typeof MODEL_OPTIONS)[number]["value"]
-  >(MODEL_OPTIONS[0].value);
+  const [models, setModels] = useState<AvailableModel[]>([]);
+  const [selectedModel, setSelectedModel] = useState<string>("");
   const [questions, setQuestions] = useState<Question[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState("");
@@ -109,8 +100,21 @@ export function InspirationPanel({
     setPrompts(data);
   };
 
+  const loadModelsData = async () => {
+    try {
+      const data = await loadAvailableModels();
+      setModels(data);
+      if (data.length > 0 && !selectedModel) {
+        setSelectedModel(data[0].slug);
+      }
+    } catch (error) {
+      console.error("Error loading models:", error);
+    }
+  };
+
   useEffect(() => {
     loadPromptsData();
+    loadModelsData();
   }, []);
 
   useEffect(() => {
@@ -421,15 +425,15 @@ export function InspirationPanel({
             <Select
               value={selectedModel}
               onValueChange={(value) =>
-                setSelectedModel(value as (typeof MODEL_OPTIONS)[number]["value"])
+                setSelectedModel(value)
               }
             >
               <SelectTrigger className="w-auto border-none bg-transparent p-0 h-auto shadow-none hover:bg-transparent focus:ring-0">
                 <SelectValue placeholder="Seleccionar modelo" />
               </SelectTrigger>
               <SelectContent>
-                {MODEL_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
+                {models.map((option) => (
+                  <SelectItem key={option.slug} value={option.slug}>
                     {option.label}
                   </SelectItem>
                 ))}
@@ -598,15 +602,15 @@ export function InspirationPanel({
             <Select
               value={selectedModel}
               onValueChange={(value) =>
-                setSelectedModel(value as (typeof MODEL_OPTIONS)[number]["value"])
+                setSelectedModel(value)
               }
             >
               <SelectTrigger className="w-auto border-none bg-transparent p-0 h-auto shadow-none hover:bg-transparent font-mono focus:ring-0">
                 <SelectValue placeholder="Seleccionar modelo" />
               </SelectTrigger>
               <SelectContent>
-                {MODEL_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
+                {models.map((option) => (
+                  <SelectItem key={option.slug} value={option.slug}>
                     {option.label}
                   </SelectItem>
                 ))}

@@ -19,6 +19,7 @@ import {
   type AdminUser,
 } from "@/lib/admin"
 import { buildBackendUrl } from "@/lib/backend"
+import { AdminModelsSection } from "@/components/admin-models-section"
 
 interface EditableUser extends AdminUser {
   password?: string
@@ -369,6 +370,8 @@ export default function AdminPage() {
             </table>
           </div>
         </section>
+
+        <AdminModelsSection />
       </div>
     )
   }
