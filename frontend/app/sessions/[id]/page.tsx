@@ -6,7 +6,7 @@ import { AppLayout } from "@/components/app-layout"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { ArrowLeft, Loader2, RefreshCw, Users } from "lucide-react"
+import { ArrowLeft, Loader2, RefreshCw, Users, Copy, Check, ExternalLink } from "lucide-react"
 import { toast } from "sonner"
 import {
   getSession,
@@ -26,6 +26,7 @@ export default function SessionDetailPage() {
   const [loading, setLoading] = useState(true)
   const [queriesLoading, setQueriesLoading] = useState(false)
   const [toggling, setToggling] = useState(false)
+  const [copied, setCopied] = useState(false)
 
   const loadSession = useCallback(async () => {
     if (!sessionId || isNaN(sessionId)) return
@@ -63,6 +64,22 @@ export default function SessionDetailPage() {
     const interval = setInterval(loadQueries, 2000)
     return () => clearInterval(interval)
   }, [session, loadQueries])
+
+  const publicJoinUrl = typeof window !== "undefined" && session
+    ? `${window.location.origin}/session/${session.access_code}`
+    : ""
+
+  const handleCopyLink = async () => {
+    if (!publicJoinUrl) return
+    try {
+      await navigator.clipboard.writeText(publicJoinUrl)
+      setCopied(true)
+      toast.success("Link copiado al portapapeles")
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      toast.error("No se pudo copiar el link")
+    }
+  }
 
   const handleToggleActive = async () => {
     if (!session) return
@@ -132,6 +149,47 @@ export default function SessionDetailPage() {
                     <p className="mt-1 font-mono text-3xl font-bold tracking-widest text-gray-900">
                       {session.access_code}
                     </p>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                      Link para alumnos
+                    </p>
+                    <div className="mt-1 flex items-center gap-2">
+                      <a
+                        href={publicJoinUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex-1 truncate text-sm text-blue-600 hover:underline"
+                        title={publicJoinUrl}
+                      >
+                        {publicJoinUrl}
+                      </a>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 w-8 p-0"
+                        onClick={handleCopyLink}
+                        title="Copiar link"
+                      >
+                        {copied ? (
+                          <Check className="h-4 w-4 text-green-600" />
+                        ) : (
+                          <Copy className="h-4 w-4" />
+                        )}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 w-8 p-0"
+                        asChild
+                        title="Abrir sesión"
+                      >
+                        <a href={publicJoinUrl} target="_blank" rel="noopener noreferrer">
+                          <ExternalLink className="h-4 w-4" />
+                        </a>
+                      </Button>
+                    </div>
                   </div>
 
                   <div className="flex items-center gap-2">

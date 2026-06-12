@@ -25,6 +25,10 @@ function getTokenKey(code: string) {
   return `session_token_${code.toUpperCase()}`
 }
 
+function getDraftKey(code: string) {
+  return `session_draft_${code.toUpperCase()}`
+}
+
 export default function StudentSessionPage() {
   const params = useParams()
   const code = String(params.code).toUpperCase()
@@ -35,6 +39,8 @@ export default function StudentSessionPage() {
   const [displayName, setDisplayName] = useState("")
   const [joining, setJoining] = useState(false)
   const [editorContent, setEditorContent] = useState("")
+  const [draftContent, setDraftContent] = useState<string | null>(null)
+  const [draftKey, setDraftKey] = useState(0)
   const [sending, setSending] = useState(false)
   const [messages, setMessages] = useState<ChatMessage[]>([])
 
@@ -52,11 +58,24 @@ export default function StudentSessionPage() {
 
   useEffect(() => {
     loadSession()
-    const stored = typeof window !== "undefined" ? localStorage.getItem(getTokenKey(code)) : null
-    if (stored) {
-      setToken(stored)
+    if (typeof window !== "undefined") {
+      const storedToken = localStorage.getItem(getTokenKey(code))
+      if (storedToken) {
+        setToken(storedToken)
+      }
+      const savedDraft = localStorage.getItem(getDraftKey(code))
+      setDraftContent(savedDraft || "")
     }
   }, [loadSession, code])
+
+  // Auto-save draft with debounce
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const timeout = setTimeout(() => {
+      localStorage.setItem(getDraftKey(code), editorContent)
+    }, 1000)
+    return () => clearTimeout(timeout)
+  }, [editorContent, code])
 
   const handleJoin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -88,6 +107,9 @@ export default function StudentSessionPage() {
         ...prev,
       ])
       setEditorContent("")
+      setDraftContent("")
+      localStorage.removeItem(getDraftKey(code))
+      setDraftKey((prev) => prev + 1)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "No se pudo enviar la consulta")
     } finally {
@@ -111,7 +133,7 @@ export default function StudentSessionPage() {
     )
   }
 
-  if (!token) {
+  if (!token || draftContent === null) {
     return (
       <div className="flex h-screen flex-col items-center justify-center bg-gray-50 p-4">
         <div className="w-full max-w-md">
@@ -226,7 +248,8 @@ export default function StudentSessionPage() {
             <div className="px-6 py-4">
               <div className="flex-1 min-h-[40dvh]">
                 <TipTapEditor
-                  initialContent={editorContent}
+                  key={draftKey}
+                  initialContent={draftContent || ""}
                   onContentChange={setEditorContent}
                 />
               </div>
