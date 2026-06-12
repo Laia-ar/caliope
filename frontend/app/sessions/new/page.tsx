@@ -18,14 +18,15 @@ import { ArrowLeft, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { createSession } from "@/lib/sessions"
 import { loadPrompts, type Prompt } from "@/lib/prompts"
-import { MODEL_OPTIONS } from "@/lib/models"
+import { loadAvailableModels, type AvailableModel } from "@/lib/models-api"
 
 export default function NewSessionPage() {
   const router = useRouter()
   const [title, setTitle] = useState("")
   const [instructions, setInstructions] = useState("")
   const [promptId, setPromptId] = useState<string>("")
-  const [model, setModel] = useState<string>(MODEL_OPTIONS[0].value)
+  const [model, setModel] = useState<string>("")
+  const [models, setModels] = useState<AvailableModel[]>([])
   const [prompts, setPrompts] = useState<Prompt[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
@@ -34,10 +35,17 @@ export default function NewSessionPage() {
     const load = async () => {
       try {
         setIsLoading(true)
-        const data = await loadPrompts()
-        setPrompts(data)
+        const [promptData, modelData] = await Promise.all([
+          loadPrompts(),
+          loadAvailableModels(),
+        ])
+        setPrompts(promptData)
+        setModels(modelData)
+        if (modelData.length > 0) {
+          setModel(modelData[0].slug)
+        }
       } catch (err) {
-        toast.error("No se pudieron cargar los prompts")
+        toast.error("No se pudieron cargar los datos")
       } finally {
         setIsLoading(false)
       }
@@ -136,8 +144,8 @@ export default function NewSessionPage() {
                   <SelectValue placeholder="Seleccionar modelo" />
                 </SelectTrigger>
                 <SelectContent>
-                  {MODEL_OPTIONS.map((m) => (
-                    <SelectItem key={m.value} value={m.value}>
+                  {models.map((m) => (
+                    <SelectItem key={m.slug} value={m.slug}>
                       {m.label}
                     </SelectItem>
                   ))}

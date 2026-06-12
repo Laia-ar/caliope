@@ -12,7 +12,7 @@ from sqlalchemy import event
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from extensions import db
-from models import init_db, User, Document, CustomPrompt, ClassroomSession, SessionParticipant, SessionQuery
+from models import init_db, User, Document, CustomPrompt, ClassroomSession, SessionParticipant, SessionQuery, AvailableModel
 import uuid
 import random
 import string
@@ -185,6 +185,20 @@ def _run_migrations():
 with app.app_context():
     _run_migrations()
     db.create_all()
+    # Seed available models if empty
+    if AvailableModel.query.count() == 0:
+        default_models = [
+            AvailableModel(slug='google/gemini-2.5-flash', label='Google Gemini'),
+            AvailableModel(slug='mistralai/mistral-nemo', label='Mistral Nemo'),
+            AvailableModel(slug='deepseek/deepseek-chat-v3-0324', label='DeepSeek'),
+            AvailableModel(slug='qwen/qwen-2.5-7b-instruct', label='Qwen 2.5 7B'),
+            AvailableModel(slug='meta-llama/llama-3.3-70b-instruct', label='Llama 3.3 70B'),
+            AvailableModel(slug='openai/gpt-4o-mini', label='GPT-4o Mini'),
+        ]
+        for m in default_models:
+            db.session.add(m)
+        db.session.commit()
+        app.logger.info("[Migration] Seeded default available models")
 
 # Enable SQLite WAL mode for better concurrent read/write performance
 @event.listens_for(Engine, "connect")
@@ -1255,6 +1269,86 @@ def update_teacher_status(user_id):
         'username': user.username,
         'can_create_sessions': user.can_create_sessions
     })
+
+# Available models endpoints
+
+@app.route('/api/models', methods=['GET'])
+def list_active_models():
+    models = AvailableModel.query.filter_by(is_active=True).order_by(AvailableModel.label).all()
+    return jsonify({
+        'models': [{
+            'id': m.id,
+            'slug': m.slug,
+            'label': m.label,
+        } for m in models]
+    })
+
+@app.route('/api/admin/models', methods=['GET'])
+@login_required
+def admin_list_models():
+    if not is_admin_user(current_user.username):
+        return jsonify({'error': 'Admin access required'}), 403
+    models = AvailableModel.query.order_by(AvailableModel.label).all()
+    return jsonify({
+        'models': [{
+            'id': m.id,
+            'slug': m.slug,
+            'label': m.label,
+            'is_active': m.is_active,
+            'updated_at': m.updated_at.isoformat()
+        } for m in models]
+    })
+
+@app.route('/api/admin/models', methods=['POST'])
+@login_required
+def admin_create_model():
+    if not is_admin_user(current_user.username):
+        return jsonify({'error': 'Admin access required'}), 403
+    data = request.get_json()
+    slug = data.get('slug', '').strip()
+    label = data.get('label', '').strip()
+    if not slug or not label:
+        return jsonify({'error': 'Slug and label are required'}), 400
+    if AvailableModel.query.filter_by(slug=slug).first():
+        return jsonify({'error': 'Model slug already exists'}), 409
+    model = AvailableModel(slug=slug, label=label, is_active=True)
+    db.session.add(model)
+    db.session.commit()
+    return jsonify({
+        'id': model.id,
+        'slug': model.slug,
+        'label': model.label,
+        'is_active': model.is_active,
+    }), 201
+
+@app.route('/api/admin/models/<int:model_id>', methods=['PUT'])
+@login_required
+def admin_update_model(model_id):
+    if not is_admin_user(current_user.username):
+        return jsonify({'error': 'Admin access required'}), 403
+    model = AvailableModel.query.get_or_404(model_id)
+    data = request.get_json()
+    model.slug = data.get('slug', model.slug).strip()
+    model.label = data.get('label', model.label).strip()
+    if 'is_active' in data:
+        model.is_active = bool(data['is_active'])
+    db.session.commit()
+    return jsonify({
+        'id': model.id,
+        'slug': model.slug,
+        'label': model.label,
+        'is_active': model.is_active,
+    })
+
+@app.route('/api/admin/models/<int:model_id>', methods=['DELETE'])
+@login_required
+def admin_delete_model(model_id):
+    if not is_admin_user(current_user.username):
+        return jsonify({'error': 'Admin access required'}), 403
+    model = AvailableModel.query.get_or_404(model_id)
+    db.session.delete(model)
+    db.session.commit()
+    return '', 204
 
 # Global error handler for 500 errors
 @app.errorhandler(500)
