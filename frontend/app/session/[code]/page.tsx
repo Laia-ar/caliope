@@ -40,7 +40,6 @@ export default function StudentSessionPage() {
   const [joining, setJoining] = useState(false)
   const [editorContent, setEditorContent] = useState("")
   const [draftContent, setDraftContent] = useState<string | null>(null)
-  const [draftKey, setDraftKey] = useState(0)
   const [sending, setSending] = useState(false)
   const [messages, setMessages] = useState<ChatMessage[]>([])
 
@@ -106,10 +105,6 @@ export default function StudentSessionPage() {
         },
         ...prev,
       ])
-      setEditorContent("")
-      setDraftContent("")
-      localStorage.removeItem(getDraftKey(code))
-      setDraftKey((prev) => prev + 1)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "No se pudo enviar la consulta")
     } finally {
@@ -248,7 +243,6 @@ export default function StudentSessionPage() {
             <div className="px-6 py-4">
               <div className="flex-1 min-h-[40dvh]">
                 <TipTapEditor
-                  key={draftKey}
                   initialContent={draftContent || ""}
                   onContentChange={setEditorContent}
                 />
