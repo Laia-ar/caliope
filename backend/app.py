@@ -500,7 +500,9 @@ def local_login():
                 return jsonify({'error': 'User conflict. Please contact support.'}), 500
     else:
         # Check database directly for users created via OAuth or invitations
-        user = User.query.filter_by(username=username).first()
+        user = User.query.filter(
+            (User.username == username) | (User.email == username)
+        ).first()
         if not user:
             return jsonify({'error': 'Invalid credentials'}), 401
         if not user.check_password(password):
