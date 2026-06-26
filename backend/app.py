@@ -478,12 +478,12 @@ def local_login():
     data = request.get_json()
     username = data.get('username')
     password = data.get('password')
-    
+
     if not username or not password:
         return jsonify({'error': 'Username and password required'}), 400
-    
+
     user_data = None
-    
+
     # First: Check environment variable credentials
     if username == ADMIN_USERNAME and ADMIN_PASSWORD and password == ADMIN_PASSWORD:
         user_data = {
@@ -493,56 +493,77 @@ def local_login():
             'name': 'Administrator',
             'is_disabled': False
         }
-    
+
     # Second: Check users.json file (if exists)
     if not user_data:
         static_users = load_users_from_json()
         user_data = next((u for u in static_users if u['username'] == username), None)
-    
-    # Validate credentials
-    if not user_data or user_data['password'] != password:
-        return jsonify({'error': 'Invalid credentials'}), 401
-    
-    # Check if account is disabled
-    if user_data.get('is_disabled', False):
-        return jsonify({'error': 'Cuenta deshabilitada. Escribinos a hola@laia.ar para seguir probando y charlando. :)'}), 403
-    
-    # Find or create user in database
-    user = User.query.filter(
-        (User.username == user_data['username']) | (User.email == user_data['email'])
-    ).first()
-    
-    if user:
-        # Update existing user credentials
-        user.name = user_data['name']
-        user.set_password(user_data['password'])
-        db.session.commit()
-    else:
-        try:
-            user = User(
-                username=user_data['username'],
-                email=user_data['email'],
-                name=user_data['name']
-            )
+
+    user = None
+
+    if user_data:
+        # Validate credentials against static data
+        if user_data['password'] != password:
+            return jsonify({'error': 'Invalid credentials'}), 401
+
+        # Check if account is disabled in static data first
+        if user_data.get('is_disabled', False):
+            return jsonify({'error': 'Cuenta deshabilitada. Escribinos a hola@laia.ar para seguir probando y charlando. :)'}), 403
+
+        # Find or create user in database
+        user = User.query.filter(
+            (User.username == user_data['username']) | (User.email == user_data['email'])
+        ).first()
+
+        if user:
+            # Update existing user credentials
+            user.name = user_data['name']
             user.set_password(user_data['password'])
-            db.session.add(user)
             db.session.commit()
-        except IntegrityError:
-            db.session.rollback()
-            app.logger.error(f"[Login] IntegrityError creating user {user_data['username']}")
-            return jsonify({'error': 'User conflict. Please contact support.'}), 500
-    
+        else:
+            try:
+                user = User(
+                    username=user_data['username'],
+                    email=user_data['email'],
+                    name=user_data['name']
+                )
+                user.set_password(user_data['password'])
+                db.session.add(user)
+                db.session.commit()
+            except IntegrityError:
+                db.session.rollback()
+                app.logger.error(f"[Login] IntegrityError creating user {user_data['username']}")
+                return jsonify({'error': 'User conflict. Please contact support.'}), 500
+    else:
+        # Third: Check database directly for users created via OAuth or invitations
+        user = User.query.filter_by(username=username).first()
+        if not user:
+            return jsonify({'error': 'Invalid credentials'}), 401
+        if not user.check_password(password):
+            return jsonify({'error': 'Invalid credentials'}), 401
+
+    # Check database-level disabled / trial expiry
+    if user.is_disabled:
+        return jsonify({'error': 'Cuenta deshabilitada. Escribinos a hola@laia.ar para seguir probando y charlando. :)'}), 403
+
+    if user.trial_expires_at and datetime.utcnow() > user.trial_expires_at:
+        user.is_disabled = True
+        db.session.commit()
+        return jsonify({'error': 'Tu período de prueba de 15 días ha expirado. Escribinos a hola@laia.ar para seguir probando y charlando. :)'}), 403
+
     login_user(user)
-    
+
     # Debug logging
     app.logger.info(f"[Login] User {user.username} logged in successfully")
     app.logger.info(f"[Login] Session cookie settings: domain={app.config.get('SESSION_COOKIE_DOMAIN')}, secure={app.config.get('SESSION_COOKIE_SECURE')}, samesite={app.config.get('SESSION_COOKIE_SAMESITE')}")
-    
+
     return jsonify({
         'id': user.id,
         'username': user.username,
         'email': user.email,
         'name': user.name,
+        'can_create_sessions': user.can_create_sessions,
+        'can_create_invites': user.can_create_invites,
         'is_admin': is_admin_user(username)
     })
 
