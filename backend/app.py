@@ -27,10 +27,13 @@ ADMIN_USERNAME = os.getenv('ADMIN_USERNAME', 'admin')
 ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD')
 
 def is_admin_user(username: str) -> bool:
-    """Check if the given username is the admin user."""
+    """Check if the given username is the admin user (env admin or DB flag)."""
     if not username:
         return False
-    return username.lower() == ADMIN_USERNAME.lower()
+    if username.lower() == ADMIN_USERNAME.lower():
+        return True
+    user = User.query.filter(db.func.lower(User.username) == username.lower()).first()
+    return bool(user and user.is_admin)
 
 def require_teacher():
     """Verify current user is authenticated and can create sessions."""
@@ -722,12 +725,21 @@ def admin_user_features(user_id):
 
     if 'can_create_invites' in data:
         user.can_create_invites = bool(data['can_create_invites'])
-        db.session.commit()
+
+    if 'is_admin' in data:
+        # Prevent self-demotion
+        if current_user.id == user.id and not bool(data['is_admin']):
+            return jsonify({'error': 'No podés quitarte el rol de administrador a vos mismo'}), 400
+        user.is_admin = bool(data['is_admin'])
+
+    db.session.commit()
 
     return jsonify({
         'id': user.id,
         'username': user.username,
-        'can_create_invites': user.can_create_invites
+        'is_admin': is_admin_user(user.username),
+        'can_create_invites': user.can_create_invites,
+        'can_create_sessions': user.can_create_sessions,
     })
 
 @app.route('/api/admin/download-db', methods=['GET'])

@@ -130,7 +130,7 @@ export async function updateTeacherStatus(userId: number, canCreateSessions: boo
 
 export async function updateUserFeatures(
   userId: number,
-  features: { can_create_invites?: boolean }
+  features: { can_create_invites?: boolean; is_admin?: boolean }
 ): Promise<AdminUser> {
   const { parsed } = await adminFetch(`/api/admin/users/${userId}/features`, {
     method: "PUT",

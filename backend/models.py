@@ -17,6 +17,7 @@ class User(db.Model, UserMixin):
     can_create_invites = db.Column(db.Boolean, default=False)
     trial_expires_at = db.Column(db.DateTime, nullable=True)
     is_disabled = db.Column(db.Boolean, default=False)
+    is_admin = db.Column(db.Boolean, default=False)
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
