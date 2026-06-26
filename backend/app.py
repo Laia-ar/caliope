@@ -6,6 +6,11 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 import os
 import json
 import shutil
+import secrets
+import uuid
+import random
+import string
+from datetime import datetime, timedelta
 from pathlib import Path
 from dotenv import load_dotenv
 from sqlalchemy import event
@@ -13,9 +18,6 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from extensions import db
 from models import init_db, User, Document, CustomPrompt, InvitationLink, ClassroomSession, SessionParticipant, SessionQuery, AvailableModel
-import uuid
-import random
-import string
 from authlib.integrations.flask_client import OAuth
 from urllib.parse import urljoin, urlparse
 
