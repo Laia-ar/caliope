@@ -23,6 +23,7 @@ export function Sidebar({ isCollapsed = false, onToggle }: SidebarProps) {
   const [isLoggingOut, setIsLoggingOut] = useState(false)
   const [isAdminUser, setIsAdminUser] = useState(false)
   const [canCreateSessions, setCanCreateSessions] = useState(false)
+  const [canCreateInvites, setCanCreateInvites] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -41,6 +42,7 @@ export function Sidebar({ isCollapsed = false, onToggle }: SidebarProps) {
         if (!cancelled && data && typeof data.username === "string") {
           setIsAdminUser(data.username.toLowerCase() === "admin")
           setCanCreateSessions(!!data.can_create_sessions)
+          setCanCreateInvites(data.can_create_invites === true)
         }
       } catch (error) {
         // Ignored on purpose: sidebar remains without admin link if request fails
@@ -82,6 +84,14 @@ export function Sidebar({ isCollapsed = false, onToggle }: SidebarProps) {
       label: "Sesiones",
       icon: "/icons/help-icon.svg",
       iconAlt: "Gestionar sesiones",
+    })
+  }
+  if (canCreateInvites) {
+    navItems.push({
+      href: "/invitations",
+      label: "Invitaciones",
+      icon: "/icons/help-icon.svg",
+      iconAlt: "Invitaciones",
     })
   }
   if (isAdminUser) {

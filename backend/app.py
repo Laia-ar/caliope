@@ -12,7 +12,7 @@ from sqlalchemy import event
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from extensions import db
-from models import init_db, User, Document, CustomPrompt, ClassroomSession, SessionParticipant, SessionQuery, AvailableModel
+from models import init_db, User, Document, CustomPrompt, InvitationLink, ClassroomSession, SessionParticipant, SessionQuery, AvailableModel
 import uuid
 import random
 import string
@@ -1402,6 +1402,117 @@ def admin_delete_model(model_id):
     db.session.delete(model)
     db.session.commit()
     return '', 204
+
+# Invitation link endpoints
+@app.route('/api/invitations', methods=['GET'])
+@login_required
+def get_invitations():
+    if not current_user.can_create_invites:
+        return jsonify({'error': 'No tenés permiso para ver invitaciones.'}), 403
+
+    links = InvitationLink.query.filter_by(created_by_id=current_user.id).order_by(InvitationLink.created_at.desc()).all()
+    return jsonify({
+        'invitations': [{
+            'id': link.id,
+            'token': link.token,
+            'created_at': link.created_at.isoformat() if link.created_at else None,
+            'expires_at': link.expires_at.isoformat() if link.expires_at else None,
+            'used': link.used_by_id is not None,
+            'used_at': link.used_at.isoformat() if link.used_at else None,
+            'used_by_email': link.used_by.email if link.used_by else None,
+        } for link in links]
+    })
+
+@app.route('/api/invitations', methods=['POST'])
+@login_required
+def create_invitation():
+    if not current_user.can_create_invites:
+        return jsonify({'error': 'No tenés permiso para crear invitaciones.'}), 403
+
+    token = secrets.token_urlsafe(32)
+    link = InvitationLink(
+        token=token,
+        created_by_id=current_user.id,
+        expires_at=datetime.utcnow() + timedelta(days=7)
+    )
+    db.session.add(link)
+    db.session.commit()
+
+    frontend_url = os.getenv('FRONTEND_URL', '')
+    invite_url = f"{frontend_url.rstrip('/')}/invite/{token}"
+
+    return jsonify({
+        'id': link.id,
+        'token': link.token,
+        'invite_url': invite_url,
+        'expires_at': link.expires_at.isoformat()
+    }), 201
+
+@app.route('/api/invitations/<token>', methods=['GET'])
+def check_invitation(token):
+    link = InvitationLink.query.filter_by(token=token).first()
+    if not link:
+        return jsonify({'error': 'Link de invitación no encontrado.'}), 404
+
+    if link.used_by_id is not None:
+        return jsonify({'error': 'Este link de invitación ya fue utilizado.'}), 410
+
+    if link.expires_at and datetime.utcnow() > link.expires_at:
+        return jsonify({'error': 'Este link de invitación ha expirado.'}), 410
+
+    return jsonify({'valid': True})
+
+@app.route('/api/invitations/<token>/register', methods=['POST'])
+def register_with_invitation(token):
+    link = InvitationLink.query.filter_by(token=token).first()
+    if not link:
+        return jsonify({'error': 'Link de invitación no encontrado.'}), 404
+
+    if link.used_by_id is not None:
+        return jsonify({'error': 'Este link de invitación ya fue utilizado.'}), 410
+
+    if link.expires_at and datetime.utcnow() > link.expires_at:
+        return jsonify({'error': 'Este link de invitación ha expirado.'}), 410
+
+    data = request.get_json()
+    username = data.get('username')
+    email = data.get('email')
+    name = data.get('name')
+    password = data.get('password')
+
+    if not username or not email or not name or not password:
+        return jsonify({'error': 'Todos los campos son obligatorios.'}), 400
+
+    if len(password) < 6:
+        return jsonify({'error': 'La contraseña debe tener al menos 6 caracteres.'}), 400
+
+    existing = User.query.filter((User.username == username) | (User.email == email)).first()
+    if existing:
+        return jsonify({'error': 'El usuario o email ya está registrado.'}), 409
+
+    try:
+        user = User(
+            username=username,
+            email=email,
+            name=name,
+            trial_expires_at=datetime.utcnow() + timedelta(days=15),
+            is_disabled=False
+        )
+        user.set_password(password)
+        db.session.add(user)
+        db.session.commit()
+
+        link.used_by_id = user.id
+        link.used_at = datetime.utcnow()
+        db.session.commit()
+
+        return jsonify({
+            'message': 'Cuenta creada exitosamente. Iniciá sesión para comenzar.',
+            'user_id': user.id
+        }), 201
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({'error': 'Error al crear el usuario. Intentá con otro nombre o email.'}), 500
 
 # Global error handler for 500 errors
 @app.errorhandler(500)
