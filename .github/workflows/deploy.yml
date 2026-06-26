@@ -1,0 +1,52 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main, staging]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
+    environment:
+      name: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
+      url: ${{ github.ref == 'refs/heads/main' && 'https://caliope.laia.ar' || 'https://ensayo.caliope.laia.ar' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Backup database (production only)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          BACKUP_DIR="/app/backups"
+          mkdir -p $BACKUP_DIR
+          DB_PATH="/app/backend/instance/app.db"
+          if [ -f "$DB_PATH" ]; then
+            cp "$DB_PATH" "$BACKUP_DIR/app-$(date +%Y%m%d-%H%M%S).db"
+            echo "Database backed up"
+          fi
+        continue-on-error: true
+
+      - name: Deploy with Docker Compose
+        run: |
+          docker compose down
+          docker compose up --build -d
+
+      - name: Health check
+        run: |
+          URL="${{ github.ref == 'refs/heads/main' && 'https://caliope.laia.ar/api/health' || 'https://ensayo.caliope.laia.ar/api/health' }}"
+          for i in {1..10}; do
+            sleep 3
+            if curl -sf "$URL" > /dev/null; then
+              echo "Health check passed"
+              exit 0
+            fi
+            echo "Attempt $i failed, retrying..."
+          done
+          echo "Health check failed"
+          exit 1
+        continue-on-error: false
