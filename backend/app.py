@@ -287,6 +287,13 @@ def save_document():
 def index():
     return 'Markdown Editor Backend Running'
 
+def _get_allowed_login_domains():
+    domains = os.getenv('ALLOWED_LOGIN_DOMAINS', '').strip()
+    if not domains:
+        return []
+    return [d.strip().lower().lstrip('@') for d in domains.split(',') if d.strip()]
+
+
 @app.route('/login')
 def login():
     redirect_to = request.args.get('redirectTo')
@@ -298,10 +305,18 @@ def login():
     redirect_uri = f"{os.getenv('BACKEND_URL', '')}/login/callback"
     # redirect_uri = url_for('authorize', _external=True)
     app.logger.debug(f"Initiating OAuth with redirect_uri: {redirect_uri}")
+
+    authorize_kwargs = {
+        'state': session.get('_state', 'default'),
+        'verify': False  # Temporarily disable state verification
+    }
+    allowed_domains = _get_allowed_login_domains()
+    if len(allowed_domains) == 1:
+        authorize_kwargs['hd'] = allowed_domains[0]
+
     return google.authorize_redirect(
         redirect_uri,
-        state=session.get('_state', 'default'),
-        verify=False  # Temporarily disable state verification
+        **authorize_kwargs
     )
 
 @app.route('/login/callback')
@@ -349,7 +364,17 @@ def authorize():
         google_id = user_info['sub']
         email = user_info['email']
         name = user_info.get('name', email)
-        
+
+        # Validate allowed email domains
+        allowed_domains = _get_allowed_login_domains()
+        if allowed_domains:
+            email_domain = email.split('@')[-1].lower()
+            if email_domain not in allowed_domains:
+                app.logger.warning(f"Login rejected for email domain: {email_domain}")
+                frontend_url = os.getenv('FRONTEND_URL', '')
+                error_target = f"{frontend_url.rstrip('/')}/auth?error=dominio_no_permitido" if frontend_url else '/auth?error=dominio_no_permitido'
+                return redirect(error_target)
+
         app.logger.debug(f"Looking up user with Google ID: {google_id}")
         user = User.query.filter_by(google_id=google_id).first()
         
