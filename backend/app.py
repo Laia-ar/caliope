@@ -1096,6 +1096,29 @@ def get_session(session_id):
         'updated_at': s.updated_at.isoformat()
     })
 
+@app.route('/api/sessions/participated', methods=['GET'])
+@login_required
+def list_participated_sessions():
+    """List classroom sessions where the current user is a participant."""
+    sessions = (
+        ClassroomSession.query
+        .join(SessionParticipant)
+        .filter(SessionParticipant.user_id == current_user.id)
+        .order_by(ClassroomSession.created_at.desc())
+        .all()
+    )
+    return jsonify({
+        'sessions': [{
+            'id': s.id,
+            'title': s.title,
+            'access_code': s.access_code,
+            'access_level': s.access_level,
+            'is_active': s.is_active,
+            'llm_model_name': s.llm_model_name,
+            'created_at': s.created_at.isoformat()
+        } for s in sessions]
+    })
+
 @app.route('/api/sessions/<int:session_id>', methods=['PUT'])
 @login_required
 def update_session(session_id):
