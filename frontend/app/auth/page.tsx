@@ -20,6 +20,21 @@ const getRedirectTarget = () => {
   return redirectTo
 }
 
+const getLoginError = () => {
+  if (typeof window === "undefined") {
+    return null
+  }
+
+  const errorParam = new URLSearchParams(window.location.search).get("error")
+  if (errorParam === "dominio_no_permitido") {
+    return "Solo se permiten cuentas de los dominios autorizados."
+  }
+  if (errorParam) {
+    return errorParam
+  }
+  return null
+}
+
 export default function LoginPage() {
   const router = useRouter()
   const backendBaseUrl = getBackendBaseUrl()
@@ -32,6 +47,11 @@ export default function LoginPage() {
   const resolveRedirectTarget = () => getRedirectTarget()
 
   useEffect(() => {
+    const loginError = getLoginError()
+    if (loginError) {
+      setError(loginError)
+    }
+
     let aborted = false
 
     const checkExistingSession = async () => {
@@ -43,7 +63,7 @@ export default function LoginPage() {
         })
 
         console.log("[Auth Debug] Response status:", response.status)
-        
+
         if (!aborted && response.ok) {
           const data = await response.json()
           console.log("[Auth Debug] User authenticated:", data)
