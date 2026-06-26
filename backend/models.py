@@ -68,6 +68,7 @@ class ClassroomSession(db.Model):
     custom_prompt_id = db.Column(db.Integer, db.ForeignKey('custom_prompts.id'), nullable=True)
     llm_model_name = db.Column(db.String(100), nullable=False)
     access_code = db.Column(db.String(10), unique=True, nullable=False, index=True)
+    access_level = db.Column(db.String(20), nullable=False, default='registered')
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -82,10 +83,12 @@ class SessionParticipant(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     session_id = db.Column(db.Integer, db.ForeignKey('classroom_sessions.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     display_name = db.Column(db.String(100), nullable=True)
     token = db.Column(db.String(36), unique=True, nullable=False)
     joined_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+    user = db.relationship('User', lazy=True)
     queries = db.relationship('SessionQuery', backref='participant', lazy=True)
 
 class SessionQuery(db.Model):

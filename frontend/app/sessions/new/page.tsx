@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/select"
 import { ArrowLeft, Loader2 } from "lucide-react"
 import { toast } from "sonner"
-import { createSession } from "@/lib/sessions"
+import { createSession, type SessionAccessLevel } from "@/lib/sessions"
 import { loadPrompts, type Prompt } from "@/lib/prompts"
 import { loadAvailableModels, type AvailableModel } from "@/lib/models-api"
 
@@ -26,6 +26,7 @@ export default function NewSessionPage() {
   const [instructions, setInstructions] = useState("")
   const [promptId, setPromptId] = useState<string>("")
   const [model, setModel] = useState<string>("")
+  const [accessLevel, setAccessLevel] = useState<SessionAccessLevel>("registered")
   const [models, setModels] = useState<AvailableModel[]>([])
   const [prompts, setPrompts] = useState<Prompt[]>([])
   const [isLoading, setIsLoading] = useState(false)
@@ -66,6 +67,7 @@ export default function NewSessionPage() {
         instructions: instructions.trim(),
         custom_prompt_id: promptId ? Number(promptId) : null,
         llm_model_name: model,
+        access_level: accessLevel,
       })
       toast.success("Sesión creada")
       router.push(`/sessions/${session.id}`)
@@ -151,6 +153,23 @@ export default function NewSessionPage() {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Acceso permitido</Label>
+              <Select value={accessLevel} onValueChange={(value) => setAccessLevel(value as SessionAccessLevel)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Seleccionar acceso" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="registered">Solo usuarios registrados</SelectItem>
+                  <SelectItem value="guests">Solo invitados</SelectItem>
+                  <SelectItem value="both">Ambos</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-gray-500">
+                Definí quién puede ingresar a la sesión con el código.
+              </p>
             </div>
 
             <div className="flex justify-end gap-3">

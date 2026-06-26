@@ -1021,6 +1021,9 @@ def create_session():
     instructions = data.get('instructions', '').strip()
     prompt_id = data.get('custom_prompt_id')
     model_name = data.get('llm_model_name')
+    access_level = data.get('access_level', 'registered').strip().lower()
+    if access_level not in ('guests', 'registered', 'both'):
+        return jsonify({'error': 'Invalid access level'}), 400
     if not title:
         return jsonify({'error': 'Title is required'}), 400
     if not model_name:
@@ -1033,6 +1036,7 @@ def create_session():
         custom_prompt_id=prompt_id if prompt_id else None,
         llm_model_name=model_name,
         access_code=code,
+        access_level=access_level,
         is_active=True
     )
     db.session.add(session_obj)
@@ -1041,6 +1045,7 @@ def create_session():
         'id': session_obj.id,
         'title': session_obj.title,
         'access_code': session_obj.access_code,
+        'access_level': session_obj.access_level,
         'is_active': session_obj.is_active,
         'created_at': session_obj.created_at.isoformat()
     }), 201
@@ -1057,6 +1062,7 @@ def list_sessions():
             'id': s.id,
             'title': s.title,
             'access_code': s.access_code,
+            'access_level': s.access_level,
             'is_active': s.is_active,
             'llm_model_name': s.llm_model_name,
             'created_at': s.created_at.isoformat()
@@ -1080,6 +1086,7 @@ def get_session(session_id):
         'title': s.title,
         'instructions': s.instructions,
         'access_code': s.access_code,
+        'access_level': s.access_level,
         'is_active': s.is_active,
         'llm_model_name': s.llm_model_name,
         'prompt': prompt,
@@ -1099,6 +1106,11 @@ def update_session(session_id):
     s.instructions = data.get('instructions', s.instructions)
     s.custom_prompt_id = data.get('custom_prompt_id', s.custom_prompt_id)
     s.llm_model_name = data.get('llm_model_name', s.llm_model_name)
+    if 'access_level' in data:
+        access_level = str(data['access_level']).strip().lower()
+        if access_level not in ('guests', 'registered', 'both'):
+            return jsonify({'error': 'Invalid access level'}), 400
+        s.access_level = access_level
     if 'is_active' in data:
         s.is_active = bool(data['is_active'])
     db.session.commit()
@@ -1106,6 +1118,7 @@ def update_session(session_id):
         'id': s.id,
         'title': s.title,
         'instructions': s.instructions,
+        'access_level': s.access_level,
         'is_active': s.is_active,
         'llm_model_name': s.llm_model_name,
         'updated_at': s.updated_at.isoformat()
@@ -1132,11 +1145,14 @@ def get_session_queries(session_id):
     queries = SessionQuery.query.filter_by(session_id=s.id).order_by(SessionQuery.created_at.desc()).all()
     result = []
     for q in queries:
-        participant_name = None
+        participant_name = 'Anónimo'
         if q.participant_id:
             participant = SessionParticipant.query.get(q.participant_id)
             if participant:
-                participant_name = participant.display_name or 'Anónimo'
+                if participant.user_id and participant.user:
+                    participant_name = participant.user.name
+                elif participant.display_name:
+                    participant_name = participant.display_name
         result.append({
             'id': q.id,
             'query_text': q.query_text,
@@ -1156,12 +1172,22 @@ def join_session():
     s = ClassroomSession.query.filter_by(access_code=code, is_active=True).first()
     if not s:
         return jsonify({'error': 'Invalid or inactive session code'}), 404
+
+    is_registered_user = current_user.is_authenticated
+
+    if s.access_level == 'registered' and not is_registered_user:
+        return jsonify({'error': 'Esta sesión requiere iniciar sesión'}), 401
+
     token = str(uuid.uuid4())
     participant = SessionParticipant(
         session_id=s.id,
-        display_name=display_name,
         token=token
     )
+    if is_registered_user:
+        participant.user_id = current_user.id
+        participant.display_name = current_user.name
+    else:
+        participant.display_name = display_name
     db.session.add(participant)
     db.session.commit()
     prompt = None
@@ -1174,6 +1200,7 @@ def join_session():
             'id': s.id,
             'title': s.title,
             'instructions': s.instructions,
+            'access_level': s.access_level,
             'llm_model_name': s.llm_model_name,
             'prompt': prompt
         },
@@ -1194,6 +1221,7 @@ def get_session_by_code(code):
         'id': s.id,
         'title': s.title,
         'instructions': s.instructions,
+        'access_level': s.access_level,
         'llm_model_name': s.llm_model_name,
         'prompt': prompt
     })

@@ -1,12 +1,12 @@
 "use client"
 
 import { useEffect, useState, useCallback } from "react"
-import { useParams } from "next/navigation"
+import { useParams, useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { TipTapEditor } from "@/components/tiptap-editor"
 import { toast } from "sonner"
-import { Send, Loader2, Sparkles, BookOpen } from "lucide-react"
+import { Send, Loader2, Sparkles, BookOpen, LogIn } from "lucide-react"
 import {
   getSessionByCode,
   joinSession,
@@ -21,6 +21,12 @@ interface ChatMessage {
   created_at: string
 }
 
+interface AuthUser {
+  id: number
+  name: string
+  email: string
+}
+
 function getTokenKey(code: string) {
   return `session_token_${code.toUpperCase()}`
 }
@@ -31,10 +37,12 @@ function getDraftKey(code: string) {
 
 export default function StudentSessionPage() {
   const params = useParams()
+  const router = useRouter()
   const code = String(params.code).toUpperCase()
 
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
+  const [authLoading, setAuthLoading] = useState(true)
   const [token, setToken] = useState<string>("")
   const [displayName, setDisplayName] = useState("")
   const [joining, setJoining] = useState(false)
@@ -42,6 +50,7 @@ export default function StudentSessionPage() {
   const [draftContent, setDraftContent] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
   const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null)
 
   const loadSession = useCallback(async () => {
     try {
@@ -55,8 +64,29 @@ export default function StudentSessionPage() {
     }
   }, [code])
 
+  const loadAuth = useCallback(async () => {
+    try {
+      setAuthLoading(true)
+      const response = await fetch("/api/check-auth", {
+        method: "GET",
+        credentials: "include",
+      })
+      if (response.ok) {
+        const data = await response.json()
+        setAuthUser(data)
+      } else {
+        setAuthUser(null)
+      }
+    } catch {
+      setAuthUser(null)
+    } finally {
+      setAuthLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
     loadSession()
+    loadAuth()
     if (typeof window !== "undefined") {
       const storedToken = localStorage.getItem(getTokenKey(code))
       if (storedToken) {
@@ -65,7 +95,7 @@ export default function StudentSessionPage() {
       const savedDraft = localStorage.getItem(getDraftKey(code))
       setDraftContent(savedDraft || "")
     }
-  }, [loadSession, code])
+  }, [loadSession, loadAuth, code])
 
   // Auto-save draft with debounce
   useEffect(() => {
@@ -76,11 +106,15 @@ export default function StudentSessionPage() {
     return () => clearTimeout(timeout)
   }, [editorContent, code])
 
-  const handleJoin = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleJoin = async (e?: React.FormEvent) => {
+    e?.preventDefault()
+    if (!session) return
     try {
       setJoining(true)
-      const result = await joinSession(code, displayName || undefined)
+      const result = await joinSession(
+        code,
+        authUser ? undefined : displayName || undefined
+      )
       localStorage.setItem(getTokenKey(code), result.participant_token)
       setToken(result.participant_token)
       setSession(result.session)
@@ -112,7 +146,7 @@ export default function StudentSessionPage() {
     }
   }
 
-  if (loading) {
+  if (loading || authLoading) {
     return (
       <div className="flex h-screen items-center justify-center bg-gray-50">
         <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
@@ -129,36 +163,93 @@ export default function StudentSessionPage() {
   }
 
   if (!token || draftContent === null) {
+    const requiresAuth = session.access_level === "registered"
+    const allowsGuests = session.access_level === "guests" || session.access_level === "both"
+    const isLoggedIn = !!authUser
+
     return (
       <div className="flex h-screen flex-col items-center justify-center bg-gray-50 p-4">
         <div className="w-full max-w-md">
           <h1 className="text-center text-2xl font-semibold text-gray-900">
             {session.title}
           </h1>
-          <p className="mt-2 text-center text-sm text-gray-500">
-            Ingresá tu nombre para unirte a la sesión.
-          </p>
-          <form onSubmit={handleJoin} className="mt-6 space-y-4">
-            <div className="space-y-2">
-              <label htmlFor="name" className="block text-sm font-medium text-gray-700">
-                Tu nombre (opcional)
-              </label>
-              <input
-                id="name"
-                placeholder="Ej: Juan"
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-4 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
-            <Button type="submit" className="w-full" disabled={joining}>
-              {joining ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                "Unirse a la sesión"
+
+          {requiresAuth && !isLoggedIn && (
+            <>
+              <p className="mt-2 text-center text-sm text-gray-500">
+                Esta sesión requiere que inicies sesión para participar.
+              </p>
+              <Button
+                className="mt-6 w-full"
+                onClick={() => router.push(`/auth?redirectTo=/session/${code}`)}
+              >
+                <LogIn className="mr-2 h-4 w-4" />
+                Iniciar sesión
+              </Button>
+            </>
+          )}
+
+          {(requiresAuth && isLoggedIn) || (allowsGuests && isLoggedIn) ? (
+            <>
+              <p className="mt-2 text-center text-sm text-gray-500">
+                Vas a entrar como{" "}
+                <span className="font-medium text-gray-900">{authUser?.name}</span>.
+              </p>
+              <Button
+                type="submit"
+                className="mt-6 w-full"
+                disabled={joining}
+                onClick={() => handleJoin()}
+              >
+                {joining ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  "Entrar a la sesión"
+                )}
+              </Button>
+            </>
+          ) : null}
+
+          {allowsGuests && !isLoggedIn && (
+            <>
+              <p className="mt-2 text-center text-sm text-gray-500">
+                {session.access_level === "both"
+                  ? "Ingresá tu nombre para unirte como invitado, o iniciá sesión si tenés cuenta."
+                  : "Ingresá tu nombre para unirte a la sesión."}
+              </p>
+              <form onSubmit={handleJoin} className="mt-6 space-y-4">
+                <div className="space-y-2">
+                  <label htmlFor="name" className="block text-sm font-medium text-gray-700">
+                    Tu nombre (opcional)
+                  </label>
+                  <input
+                    id="name"
+                    placeholder="Ej: Juan"
+                    value={displayName}
+                    onChange={(e) => setDisplayName(e.target.value)}
+                    className="w-full rounded-lg border border-gray-300 px-4 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+                <Button type="submit" className="w-full" disabled={joining}>
+                  {joining ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    "Unirse a la sesión"
+                  )}
+                </Button>
+              </form>
+              {session.access_level === "both" && (
+                <Button
+                  variant="outline"
+                  className="mt-3 w-full"
+                  onClick={() => router.push(`/auth?redirectTo=/session/${code}`)}
+                >
+                  <LogIn className="mr-2 h-4 w-4" />
+                  Iniciar sesión
+                </Button>
               )}
-            </Button>
-          </form>
+            </>
+          )}
         </div>
       </div>
     )

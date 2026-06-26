@@ -192,9 +192,16 @@ export default function SessionDetailPage() {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <Badge variant={session.is_active ? "default" : "secondary"}>
                       {session.is_active ? "Activa" : "Inactiva"}
+                    </Badge>
+                    <Badge variant="outline">
+                      {session.access_level === "registered"
+                        ? "Solo registrados"
+                        : session.access_level === "guests"
+                          ? "Solo invitados"
+                          : "Ambos"}
                     </Badge>
                     <Button
                       variant="outline"

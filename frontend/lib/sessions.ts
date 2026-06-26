@@ -1,9 +1,12 @@
 import { buildBackendUrl } from "./backend"
 
+export type SessionAccessLevel = 'guests' | 'registered' | 'both'
+
 export interface Session {
   id: number
   title: string
   access_code: string
+  access_level: SessionAccessLevel
   is_active: boolean
   llm_model_name: string
   instructions?: string
@@ -29,6 +32,7 @@ export interface CreateSessionData {
   instructions: string
   custom_prompt_id?: number | null
   llm_model_name: string
+  access_level?: SessionAccessLevel
   is_active?: boolean
 }
 
