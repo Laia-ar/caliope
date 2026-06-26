@@ -12,8 +12,6 @@ import { toast } from "sonner"
 import {
   fetchAdminStats,
   fetchAdminUsers,
-  fetchUsersRawJson,
-  updateUsersRawJson,
   updateTeacherStatus,
   updateUserFeatures,
   type AdminStats,
@@ -41,11 +39,7 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const [isRawEditorOpen, setIsRawEditorOpen] = useState(false)
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
-  const [rawUsersJson, setRawUsersJson] = useState("")
-  const [isRawJsonLoading, setIsRawJsonLoading] = useState(false)
-  const [isRawJsonSaving, setIsRawJsonSaving] = useState(false)
   const [editingUser, setEditingUser] = useState<EditableUser | null>(null)
   const [isUploading, setIsUploading] = useState(false)
   const [togglingTeacherId, setTogglingTeacherId] = useState<number | null>(null)
@@ -94,48 +88,6 @@ export default function AdminPage() {
       cancelled = true
     }
   }, [])
-
-  const handleOpenRawEditor = async () => {
-    try {
-      setIsRawJsonLoading(true)
-      const content = await fetchUsersRawJson()
-      setRawUsersJson(content)
-      setIsRawEditorOpen(true)
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "No se pudo cargar el archivo JSON"
-      toast.error(message)
-    } finally {
-      setIsRawJsonLoading(false)
-    }
-  }
-
-  const handleSaveRawJson = async () => {
-    try {
-      JSON.parse(rawUsersJson)
-    } catch (error) {
-      toast.error("El JSON no tiene un formato válido")
-      return
-    }
-
-    try {
-      setIsRawJsonSaving(true)
-      await updateUsersRawJson(rawUsersJson)
-      toast.success("Archivo actualizado correctamente")
-      setIsRawEditorOpen(false)
-
-      const [statsResponse, usersResponse] = await Promise.all([
-        fetchAdminStats(),
-        fetchAdminUsers(),
-      ])
-      setStats(statsResponse)
-      setUsers(usersResponse)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "No se pudo guardar el archivo"
-      toast.error(message)
-    } finally {
-      setIsRawJsonSaving(false)
-    }
-  }
 
   const handleDownloadDatabase = () => {
     window.open(buildBackendUrl("/api/admin/download-db"), "_blank")
@@ -324,13 +276,6 @@ export default function AdminPage() {
                 {users.length === 1 ? "1 usuario registrado" : `${users.length} usuarios registrados`}
               </p>
             </div>
-            <Button
-              variant="outline"
-              onClick={handleOpenRawEditor}
-              disabled={isRawJsonLoading}
-            >
-              {isRawJsonLoading ? "Abriendo..." : "Editar JSON crudo"}
-            </Button>
           </div>
 
           <div className="mt-6 overflow-hidden rounded-xl border border-gray-100">
@@ -423,31 +368,6 @@ export default function AdminPage() {
           {renderContent()}
         </div>
       </div>
-
-      <Dialog open={isRawEditorOpen} onOpenChange={setIsRawEditorOpen}>
-        <DialogContent className="max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>Editar usuarios</DialogTitle>
-            <DialogDescription>
-              Modificá el contenido de <code>users.json</code>. Al guardar se validará que el formato sea JSON válido.
-            </DialogDescription>
-          </DialogHeader>
-          <Textarea
-            value={rawUsersJson}
-            onChange={(event) => setRawUsersJson(event.target.value)}
-            rows={16}
-            className="font-mono text-sm"
-          />
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsRawEditorOpen(false)}>
-              Cancelar
-            </Button>
-            <Button onClick={handleSaveRawJson} disabled={isRawJsonSaving}>
-              {isRawJsonSaving ? "Guardando..." : "Guardar cambios"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
         <DialogContent>
