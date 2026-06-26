@@ -22,6 +22,8 @@ def run_migrations():
         spec = importlib.util.spec_from_file_location(f"migration_{filename[:-3]}", path)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
+        if hasattr(module, "migrate"):
+            module.migrate()
         print(f"Finished migration: {filename}")
 
     print("All migrations completed.")
