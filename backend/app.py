@@ -17,7 +17,8 @@ from sqlalchemy import event
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from extensions import db
-from models import init_db, User, Document, CustomPrompt, InvitationLink, ClassroomSession, SessionParticipant, SessionQuery, AvailableModel
+from models import init_db, User, Document, CustomPrompt, InvitationLink, ClassroomSession, SessionParticipant, SessionQuery, AvailableModel, UsageLog
+from openrouter_usage import create_usage_log, sync_missing_costs
 from authlib.integrations.flask_client import OAuth
 from urllib.parse import urljoin, urlparse
 
@@ -556,6 +557,96 @@ def admin_dashboard():
         }
     })
 
+@app.route('/api/admin/usage/sync-costs', methods=['POST'])
+@login_required
+def admin_sync_usage_costs():
+    if not is_admin_user(current_user.username):
+        return jsonify({'error': 'Admin access required'}), 403
+    try:
+        result = sync_missing_costs(limit=100)
+        return jsonify(result)
+    except Exception as e:
+        app.logger.error(f"Failed to sync usage costs: {e}")
+        return jsonify({'error': 'Failed to sync costs'}), 500
+
+
+@app.route('/api/admin/usage/summary', methods=['GET'])
+@login_required
+def admin_usage_summary():
+    if not is_admin_user(current_user.username):
+        return jsonify({'error': 'Admin access required'}), 403
+
+    from sqlalchemy import func
+
+    rows = (
+        db.session.query(
+            User.id,
+            User.username,
+            User.name,
+            func.coalesce(func.sum(UsageLog.total_tokens), 0).label('total_tokens'),
+            func.coalesce(func.sum(UsageLog.cost_usd), 0).label('total_cost_usd'),
+            func.coalesce(func.count(UsageLog.id), 0).label('total_queries'),
+        )
+        .outerjoin(UsageLog, UsageLog.user_id == User.id)
+        .group_by(User.id)
+        .order_by(func.coalesce(func.sum(UsageLog.cost_usd), 0).desc())
+        .all()
+    )
+
+    return jsonify({
+        'users': [{
+            'id': row.id,
+            'username': row.username,
+            'name': row.name,
+            'total_tokens': int(row.total_tokens),
+            'total_cost_usd': float(row.total_cost_usd) if row.total_cost_usd else 0.0,
+            'total_queries': int(row.total_queries),
+        } for row in rows]
+    })
+
+
+@app.route('/api/admin/usage/over-time', methods=['GET'])
+@login_required
+def admin_usage_over_time():
+    if not is_admin_user(current_user.username):
+        return jsonify({'error': 'Admin access required'}), 403
+
+    group_by = request.args.get('group_by', 'day')
+    if group_by not in ('day', 'week', 'month'):
+        group_by = 'day'
+
+    from sqlalchemy import func
+
+    if group_by == 'day':
+        period_expr = func.strftime('%Y-%m-%d', UsageLog.created_at)
+    elif group_by == 'week':
+        period_expr = func.strftime('%Y-%W', UsageLog.created_at)
+    else:
+        period_expr = func.strftime('%Y-%m', UsageLog.created_at)
+
+    rows = (
+        db.session.query(
+            period_expr.label('period'),
+            func.coalesce(func.sum(UsageLog.total_tokens), 0).label('total_tokens'),
+            func.coalesce(func.sum(UsageLog.cost_usd), 0).label('total_cost_usd'),
+            func.coalesce(func.count(UsageLog.id), 0).label('total_queries'),
+        )
+        .group_by(period_expr)
+        .order_by(period_expr)
+        .all()
+    )
+
+    return jsonify({
+        'group_by': group_by,
+        'data': [{
+            'period': row.period,
+            'total_tokens': int(row.total_tokens),
+            'total_cost_usd': float(row.total_cost_usd) if row.total_cost_usd else 0.0,
+            'total_queries': int(row.total_queries),
+        } for row in rows]
+    })
+
+
 @app.route('/api/admin/users', methods=['GET'])
 @login_required
 def admin_users():
@@ -971,6 +1062,7 @@ def query():
         response_data = response.json()
         logging.debug(f"Full response: {response_data}")
         message = response_data['choices'][0]['message']['content']
+        generation_id = response_data.get('id')
         
         # Save the query to the database
         user = current_user
@@ -987,6 +1079,20 @@ def query():
         
         db.session.add(query_record)
         db.session.commit()
+
+        # Log OpenRouter usage
+        try:
+            create_usage_log(
+                user_id=user_id,
+                query_id=query_record.id,
+                session_query_id=None,
+                session_participant_id=None,
+                model_name=llm_model_name or "unknown",
+                generation_id=generation_id,
+                response_data=response_data,
+            )
+        except Exception as e:
+            logging.warning(f"Failed to log OpenRouter usage: {e}")
         
         logging.debug(f"Query saved to database with ID: {query_record.id}")
         
@@ -1291,6 +1397,7 @@ def session_query(session_id):
         response.raise_for_status()
         response_data = response.json()
         message = response_data['choices'][0]['message']['content']
+        generation_id = response_data.get('id')
         query_record = SessionQuery(
             session_id=s.id,
             participant_id=participant.id,
@@ -1299,6 +1406,21 @@ def session_query(session_id):
         )
         db.session.add(query_record)
         db.session.commit()
+
+        # Log OpenRouter usage
+        try:
+            create_usage_log(
+                user_id=participant.user_id,
+                query_id=None,
+                session_query_id=query_record.id,
+                session_participant_id=participant.id,
+                model_name=s.llm_model_name or "unknown",
+                generation_id=generation_id,
+                response_data=response_data,
+            )
+        except Exception as e:
+            logging.warning(f"Failed to log OpenRouter usage for session query: {e}")
+
         return jsonify({"message": message})
     except requests.exceptions.RequestException as e:
         error_details = {

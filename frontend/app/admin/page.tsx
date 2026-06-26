@@ -14,11 +14,25 @@ import {
   fetchAdminUsers,
   updateTeacherStatus,
   updateUserFeatures,
+  fetchUsageSummary,
+  fetchUsageOverTime,
+  syncUsageCosts,
   type AdminStats,
   type AdminUser,
+  type UsageSummaryUser,
+  type UsageOverTimePoint,
 } from "@/lib/admin"
 import { buildBackendUrl } from "@/lib/backend"
 import { AdminModelsSection } from "@/components/admin-models-section"
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from "recharts"
 
 interface EditableUser extends AdminUser {
   password?: string
@@ -45,6 +59,11 @@ export default function AdminPage() {
   const [togglingTeacherId, setTogglingTeacherId] = useState<number | null>(null)
   const [togglingUserId, setTogglingUserId] = useState<number | null>(null)
 
+  const [usageUsers, setUsageUsers] = useState<UsageSummaryUser[]>([])
+  const [usageOverTime, setUsageOverTime] = useState<UsageOverTimePoint[]>([])
+  const [usageGroupBy, setUsageGroupBy] = useState<"day" | "week" | "month">("day")
+  const [isSyncingCosts, setIsSyncingCosts] = useState(false)
+
   const statEntries = useMemo(() => {
     if (!stats) {
       return []
@@ -61,14 +80,18 @@ export default function AdminPage() {
         setLoading(true)
         setError(null)
 
-        const [statsResponse, usersResponse] = await Promise.all([
+        const [statsResponse, usersResponse, usageResponse, usageTimeResponse] = await Promise.all([
           fetchAdminStats(),
           fetchAdminUsers(),
+          fetchUsageSummary(),
+          fetchUsageOverTime(usageGroupBy),
         ])
 
         if (!cancelled) {
           setStats(statsResponse)
           setUsers(usersResponse)
+          setUsageUsers(usageResponse)
+          setUsageOverTime(usageTimeResponse)
         }
       } catch (err) {
         if (!cancelled) {
@@ -87,7 +110,25 @@ export default function AdminPage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [usageGroupBy])
+
+  const handleSyncCosts = async () => {
+    try {
+      setIsSyncingCosts(true)
+      const result = await syncUsageCosts()
+      toast.success(`Costos sincronizados: ${result.updated} actualizados, ${result.failed} fallidos`)
+      const [usageResponse, usageTimeResponse] = await Promise.all([
+        fetchUsageSummary(),
+        fetchUsageOverTime(usageGroupBy),
+      ])
+      setUsageUsers(usageResponse)
+      setUsageOverTime(usageTimeResponse)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "No se pudieron sincronizar los costos")
+    } finally {
+      setIsSyncingCosts(false)
+    }
+  }
 
   const handleDownloadDatabase = () => {
     window.open(buildBackendUrl("/api/admin/download-db"), "_blank")
@@ -347,6 +388,94 @@ export default function AdminPage() {
                 )}
               </tbody>
             </table>
+          </div>
+        </section>
+
+        <section className="mb-10">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-xl font-semibold text-gray-900">Uso de OpenRouter</h2>
+            <Button variant="outline" onClick={handleSyncCosts} disabled={isSyncingCosts}>
+              {isSyncingCosts ? "Sincronizando..." : "Sincronizar costos"}
+            </Button>
+          </div>
+
+          <div className="mb-6 overflow-hidden rounded-xl border border-gray-200 bg-white">
+            <table className="min-w-full divide-y divide-gray-200 text-sm">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-3 text-left font-medium text-gray-600">Usuario</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-600">Consultas</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-600">Tokens</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-600">Costo USD</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {usageUsers.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="px-4 py-8 text-center text-gray-500">
+                      No hay datos de uso registrados.
+                    </td>
+                  </tr>
+                ) : (
+                  usageUsers.map((u) => (
+                    <tr key={u.id}>
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-gray-900">{u.name}</div>
+                        <div className="text-xs text-gray-500">{u.username}</div>
+                      </td>
+                      <td className="px-4 py-3">{u.total_queries}</td>
+                      <td className="px-4 py-3">{u.total_tokens.toLocaleString()}</td>
+                      <td className="px-4 py-3">${u.total_cost_usd.toFixed(6)}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="rounded-xl border border-gray-200 bg-white p-4">
+            <div className="mb-4 flex items-center gap-2">
+              <span className="text-sm font-medium text-gray-700">Agrupar por:</span>
+              {(["day", "week", "month"] as const).map((g) => (
+                <Button
+                  key={g}
+                  variant={usageGroupBy === g ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setUsageGroupBy(g)}
+                >
+                  {g === "day" ? "Día" : g === "week" ? "Semana" : "Mes"}
+                </Button>
+              ))}
+            </div>
+            <div className="h-80">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={usageOverTime}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="period" />
+                  <YAxis yAxisId="left" />
+                  <YAxis yAxisId="right" orientation="right" />
+                  <Tooltip />
+                  <Line
+                    yAxisId="left"
+                    type="monotone"
+                    dataKey="total_tokens"
+                    name="Tokens"
+                    stroke="#1862A2"
+                    strokeWidth={2}
+                    dot={false}
+                  />
+                  <Line
+                    yAxisId="right"
+                    type="monotone"
+                    dataKey="total_cost_usd"
+                    name="Costo USD"
+                    stroke="#10B981"
+                    strokeWidth={2}
+                    dot={false}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
           </div>
         </section>
 
