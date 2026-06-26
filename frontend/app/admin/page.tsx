@@ -60,7 +60,7 @@ export default function AdminPage() {
   const [isUploading, setIsUploading] = useState(false)
   const [togglingTeacherId, setTogglingTeacherId] = useState<number | null>(null)
   const [togglingAdminId, setTogglingAdminId] = useState<number | null>(null)
-  const [togglingUserId, setTogglingUserId] = useState<number | null>(null)
+  const [togglingInviteId, setTogglingInviteId] = useState<number | null>(null)
 
   const [usageUsers, setUsageUsers] = useState<UsageSummaryUser[]>([])
   const [usageOverTime, setUsageOverTime] = useState<UsageOverTimePoint[]>([])
@@ -230,8 +230,8 @@ export default function AdminPage() {
   }
 
   const handleToggleCanInvite = async (user: AdminUser) => {
-    if (togglingUserId === user.id) return
-    setTogglingUserId(user.id)
+    if (togglingInviteId === user.id) return
+    setTogglingInviteId(user.id)
     try {
       const updated = await updateUserFeatures(user.id, {
         can_create_invites: !user.can_create_invites,
@@ -244,7 +244,7 @@ export default function AdminPage() {
       const message = err instanceof Error ? err.message : "No se pudo actualizar el usuario"
       toast.error(message)
     } finally {
-      setTogglingUserId(null)
+      setTogglingInviteId(null)
     }
   }
 
@@ -405,16 +405,14 @@ export default function AdminPage() {
                         </Button>
                       </td>
                       <td className="px-4 py-3">
-                        <label className="inline-flex items-center gap-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            className="h-4 w-4 rounded border-gray-300 text-[#1862A2] focus:ring-[#1862A2]"
-                            checked={user.can_create_invites}
-                            onChange={() => handleToggleCanInvite(user)}
-                            disabled={togglingUserId === user.id}
-                          />
-                          <span className="text-gray-600">{user.can_create_invites ? "Sí" : "No"}</span>
-                        </label>
+                        <Button
+                          variant={user.can_create_invites ? "default" : "outline"}
+                          size="sm"
+                          disabled={togglingInviteId === user.id}
+                          onClick={() => handleToggleCanInvite(user)}
+                        >
+                          {user.can_create_invites ? "Sí" : "No"}
+                        </Button>
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex flex-wrap items-center gap-2">
