@@ -465,6 +465,7 @@ def check_auth():
             'email': user.email,
             'name': user.name,
             'can_create_sessions': user.can_create_sessions,
+            'can_create_invites': user.can_create_invites,
             'is_admin': is_admin_user(user.username)
         })
     else:
@@ -580,8 +581,30 @@ def admin_users():
             'email': user.email,
             'name': user.name,
             'is_admin': is_admin_user(user.username),
-            'can_create_sessions': user.can_create_sessions
+            'can_create_sessions': user.can_create_sessions,
+            'can_create_invites': user.can_create_invites
         } for user in users]
+    })
+
+@app.route('/api/admin/users/<int:user_id>/features', methods=['PUT'])
+@login_required
+def admin_user_features(user_id):
+    if not is_admin_user(current_user.username):
+        return jsonify({'error': 'Admin access required'}), 403
+
+    data = request.get_json()
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+
+    if 'can_create_invites' in data:
+        user.can_create_invites = bool(data['can_create_invites'])
+        db.session.commit()
+
+    return jsonify({
+        'id': user.id,
+        'username': user.username,
+        'can_create_invites': user.can_create_invites
     })
 
 @app.route('/api/admin/users/rawjson', methods=['GET'])
