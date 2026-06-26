@@ -39,15 +39,6 @@ def require_teacher():
         return jsonify({'message': 'Teacher access required'}), 403
     return None
 
-def load_users_from_json():
-    """Load users from users.json if it exists, otherwise return empty list."""
-    users_file = Path(__file__).parent / 'users.json'
-    if users_file.exists():
-        with open(users_file) as f:
-            return json.load(f)['users']
-    
-    return []
-
 def get_admin_user():
     """Get admin user from environment variable or create default."""
     if ADMIN_USERNAME and ADMIN_PASSWORD:
@@ -482,60 +473,33 @@ def local_login():
     if not username or not password:
         return jsonify({'error': 'Username and password required'}), 400
 
-    user_data = None
-
-    # First: Check environment variable credentials
-    if username == ADMIN_USERNAME and ADMIN_PASSWORD and password == ADMIN_PASSWORD:
-        user_data = {
-            'username': ADMIN_USERNAME,
-            'password': ADMIN_PASSWORD,
-            'email': f'{ADMIN_USERNAME}@app.local',
-            'name': 'Administrator',
-            'is_disabled': False
-        }
-
-    # Second: Check users.json file (if exists)
-    if not user_data:
-        static_users = load_users_from_json()
-        user_data = next((u for u in static_users if u['username'] == username), None)
-
     user = None
 
-    if user_data:
-        # Validate credentials against static data
-        if user_data['password'] != password:
-            return jsonify({'error': 'Invalid credentials'}), 401
-
-        # Check if account is disabled in static data first
-        if user_data.get('is_disabled', False):
-            return jsonify({'error': 'Cuenta deshabilitada. Escribinos a hola@laia.ar para seguir probando y charlando. :)'}), 403
-
-        # Find or create user in database
+    # Admin from environment variables
+    if username == ADMIN_USERNAME and ADMIN_PASSWORD and password == ADMIN_PASSWORD:
         user = User.query.filter(
-            (User.username == user_data['username']) | (User.email == user_data['email'])
+            (User.username == ADMIN_USERNAME) | (User.email == f'{ADMIN_USERNAME}@app.local')
         ).first()
-
         if user:
-            # Update existing user credentials
-            user.name = user_data['name']
-            user.set_password(user_data['password'])
+            user.name = 'Administrator'
+            user.set_password(ADMIN_PASSWORD)
             db.session.commit()
         else:
             try:
                 user = User(
-                    username=user_data['username'],
-                    email=user_data['email'],
-                    name=user_data['name']
+                    username=ADMIN_USERNAME,
+                    email=f'{ADMIN_USERNAME}@app.local',
+                    name='Administrator'
                 )
-                user.set_password(user_data['password'])
+                user.set_password(ADMIN_PASSWORD)
                 db.session.add(user)
                 db.session.commit()
             except IntegrityError:
                 db.session.rollback()
-                app.logger.error(f"[Login] IntegrityError creating user {user_data['username']}")
+                app.logger.error("[Login] IntegrityError creating admin user")
                 return jsonify({'error': 'User conflict. Please contact support.'}), 500
     else:
-        # Third: Check database directly for users created via OAuth or invitations
+        # Check database directly for users created via OAuth or invitations
         user = User.query.filter_by(username=username).first()
         if not user:
             return jsonify({'error': 'Invalid credentials'}), 401
@@ -629,41 +593,6 @@ def admin_user_features(user_id):
         'username': user.username,
         'can_create_invites': user.can_create_invites
     })
-
-@app.route('/api/admin/users/rawjson', methods=['GET'])
-@login_required
-def get_raw_users_json():
-    if not is_admin_user(current_user.username):
-        return jsonify({'error': 'Admin access required'}), 403
-    
-    try:
-        users_file = Path(__file__).parent / 'users.json'
-        with open(users_file, 'r') as f:
-            content = f.read()
-        return content, 200, {'Content-Type': 'application/json'}
-    except Exception as e:
-        return jsonify({'error': f'Failed to read users.json: {str(e)}'}), 500
-
-@app.route('/api/admin/users/rawjson', methods=['PUT'])
-@login_required
-def update_raw_users_json():
-    if not is_admin_user(current_user.username):
-        return jsonify({'error': 'Admin access required'}), 403
-    
-    try:
-        # Validate JSON is parseable
-        json.loads(request.data)
-        
-        users_file = Path(__file__).parent / 'users.json'
-        with open(users_file, 'w') as f:
-            f.write(request.data.decode('utf-8'))
-            
-        return jsonify({'message': 'users.json updated successfully'})
-        
-    except json.JSONDecodeError:
-        return jsonify({'error': 'Invalid JSON format'}), 400
-    except Exception as e:
-        return jsonify({'error': f'Failed to update users.json: {str(e)}'}), 500
 
 @app.route('/api/admin/download-db', methods=['GET'])
 @login_required

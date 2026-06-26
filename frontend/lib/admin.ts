@@ -121,28 +121,6 @@ export async function fetchAdminUsers(): Promise<AdminUser[]> {
   return rawUsers.map(normalizeUser)
 }
 
-export async function fetchUsersRawJson(): Promise<string> {
-  const { text } = await adminFetch("/api/admin/users/rawjson", {
-    headers: {
-      Accept: "application/json",
-    },
-  })
-  return text
-}
-
-export async function updateUsersRawJson(rawContent: string): Promise<void> {
-  await adminFetch(
-    "/api/admin/users/rawjson",
-    {
-      method: "PUT",
-      body: rawContent,
-      headers: {
-        "Content-Type": "application/json",
-      },
-    },
-  )
-}
-
 export async function updateTeacherStatus(userId: number, canCreateSessions: boolean): Promise<void> {
   await adminFetch(`/api/admin/users/${userId}/teacher-status`, {
     method: "PUT",
