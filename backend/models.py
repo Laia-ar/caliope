@@ -136,6 +136,15 @@ class UsageLog(db.Model):
 
     user = db.relationship('User', lazy=True)
 
+class OpenRouterBalanceSnapshot(db.Model):
+    __tablename__ = 'openrouter_balance_snapshots'
+
+    id = db.Column(db.Integer, primary_key=True)
+    total_credits = db.Column(db.Numeric(20, 10), nullable=False)
+    total_usage = db.Column(db.Numeric(20, 10), nullable=False)
+    balance_usd = db.Column(db.Numeric(20, 10), nullable=False)
+    checked_at = db.Column(db.DateTime, default=datetime.utcnow)
+
 class AvailableModel(db.Model):
     __tablename__ = 'available_models'
 

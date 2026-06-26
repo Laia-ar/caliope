@@ -17,8 +17,8 @@ from sqlalchemy import event
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from extensions import db
-from models import init_db, User, Document, CustomPrompt, InvitationLink, ClassroomSession, SessionParticipant, SessionQuery, AvailableModel, UsageLog
-from openrouter_usage import create_usage_log, sync_missing_costs
+from models import init_db, User, Document, CustomPrompt, InvitationLink, ClassroomSession, SessionParticipant, SessionQuery, AvailableModel, UsageLog, OpenRouterBalanceSnapshot
+from openrouter_usage import create_usage_log, sync_missing_costs, fetch_openrouter_credits
 from authlib.integrations.flask_client import OAuth
 from urllib.parse import urljoin, urlparse
 
@@ -568,6 +568,49 @@ def admin_sync_usage_costs():
     except Exception as e:
         app.logger.error(f"Failed to sync usage costs: {e}")
         return jsonify({'error': 'Failed to sync costs'}), 500
+
+
+@app.route('/api/admin/openrouter/credits', methods=['GET'])
+@login_required
+def admin_openrouter_credits():
+    if not is_admin_user(current_user.username):
+        return jsonify({'error': 'Admin access required'}), 403
+
+    credits = fetch_openrouter_credits()
+    if not credits:
+        return jsonify({'error': 'No se pudieron obtener los créditos de OpenRouter'}), 502
+
+    snapshot = OpenRouterBalanceSnapshot(
+        total_credits=credits['total_credits'],
+        total_usage=credits['total_usage'],
+        balance_usd=credits['balance_usd'],
+    )
+    db.session.add(snapshot)
+    db.session.commit()
+
+    return jsonify({
+        'total_credits': float(credits['total_credits']),
+        'total_usage': float(credits['total_usage']),
+        'balance_usd': float(credits['balance_usd']),
+        'checked_at': snapshot.checked_at.isoformat(),
+    })
+
+
+@app.route('/api/admin/openrouter/credits/history', methods=['GET'])
+@login_required
+def admin_openrouter_credits_history():
+    if not is_admin_user(current_user.username):
+        return jsonify({'error': 'Admin access required'}), 403
+
+    snapshots = OpenRouterBalanceSnapshot.query.order_by(OpenRouterBalanceSnapshot.checked_at.desc()).limit(100).all()
+    return jsonify({
+        'history': [{
+            'total_credits': float(s.total_credits),
+            'total_usage': float(s.total_usage),
+            'balance_usd': float(s.balance_usd),
+            'checked_at': s.checked_at.isoformat(),
+        } for s in reversed(snapshots)]
+    })
 
 
 @app.route('/api/admin/usage/summary', methods=['GET'])
