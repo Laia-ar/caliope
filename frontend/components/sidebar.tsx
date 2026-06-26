@@ -21,6 +21,7 @@ export function Sidebar({ isCollapsed = false, onToggle }: SidebarProps) {
   const [isHelpModalOpen, setIsHelpModalOpen] = useState(false)
   const [isHovered, setIsHovered] = useState(false)
   const [isLoggingOut, setIsLoggingOut] = useState(false)
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [isAdminUser, setIsAdminUser] = useState(false)
   const [canCreateSessions, setCanCreateSessions] = useState(false)
   const [canCreateInvites, setCanCreateInvites] = useState(false)
@@ -40,6 +41,7 @@ export function Sidebar({ isCollapsed = false, onToggle }: SidebarProps) {
 
         const data = await response.json().catch(() => null)
         if (!cancelled && data && typeof data.username === "string") {
+          setIsAuthenticated(true)
           setIsAdminUser(data.username.toLowerCase() === "admin")
           setCanCreateSessions(!!data.can_create_sessions)
           setCanCreateInvites(data.can_create_invites === true)
@@ -78,12 +80,12 @@ export function Sidebar({ isCollapsed = false, onToggle }: SidebarProps) {
   ]
 
   let navItems = [...baseNavItems]
-  if (canCreateSessions) {
+  if (isAuthenticated) {
     navItems.push({
       href: "/sessions",
       label: "Sesiones",
       icon: "/icons/help-icon.svg",
-      iconAlt: "Gestionar sesiones",
+      iconAlt: "Mis sesiones",
     })
   }
   if (canCreateInvites) {

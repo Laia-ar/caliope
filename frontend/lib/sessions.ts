@@ -83,6 +83,12 @@ export async function listSessions(): Promise<Session[]> {
   return Array.isArray(data.sessions) ? (data.sessions as Session[]) : []
 }
 
+export async function fetchParticipatedSessions(): Promise<Session[]> {
+  const result = await apiCall("/api/sessions/participated")
+  const data = result && typeof result === "object" ? (result as Record<string, unknown>) : {}
+  return Array.isArray(data.sessions) ? (data.sessions as Session[]) : []
+}
+
 export async function getSession(id: number): Promise<Session> {
   return (await apiCall(`/api/sessions/${id}`)) as Session
 }
