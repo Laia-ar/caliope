@@ -59,6 +59,7 @@ export default function AdminPage() {
   const [editingUser, setEditingUser] = useState<EditableUser | null>(null)
   const [isUploading, setIsUploading] = useState(false)
   const [togglingTeacherId, setTogglingTeacherId] = useState<number | null>(null)
+  const [togglingAdminId, setTogglingAdminId] = useState<number | null>(null)
   const [togglingUserId, setTogglingUserId] = useState<number | null>(null)
 
   const [usageUsers, setUsageUsers] = useState<UsageSummaryUser[]>([])
@@ -248,8 +249,8 @@ export default function AdminPage() {
   }
 
   const handleToggleAdmin = async (user: AdminUser) => {
-    if (togglingUserId === user.id) return
-    setTogglingUserId(user.id)
+    if (togglingAdminId === user.id) return
+    setTogglingAdminId(user.id)
     try {
       const updated = await updateUserFeatures(user.id, {
         is_admin: !user.is_admin,
@@ -262,7 +263,7 @@ export default function AdminPage() {
       const message = err instanceof Error ? err.message : "No se pudo actualizar el usuario"
       toast.error(message)
     } finally {
-      setTogglingUserId(null)
+      setTogglingAdminId(null)
     }
   }
 
@@ -384,16 +385,14 @@ export default function AdminPage() {
                       <td className="px-4 py-3 text-gray-600">{user.email || "—"}</td>
                       <td className="px-4 py-3 text-gray-600">{user.name || "—"}</td>
                       <td className="px-4 py-3">
-                        <label className="inline-flex items-center gap-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            className="h-4 w-4 rounded border-gray-300 text-[#1862A2] focus:ring-[#1862A2]"
-                            checked={user.is_admin}
-                            onChange={() => handleToggleAdmin(user)}
-                            disabled={togglingUserId === user.id}
-                          />
-                          <span className="text-gray-600">{user.is_admin ? "Sí" : "No"}</span>
-                        </label>
+                        <Button
+                          variant={user.is_admin ? "default" : "outline"}
+                          size="sm"
+                          disabled={togglingAdminId === user.id}
+                          onClick={() => handleToggleAdmin(user)}
+                        >
+                          {user.is_admin ? "Sí" : "No"}
+                        </Button>
                       </td>
                       <td className="px-4 py-3">
                         <Button
