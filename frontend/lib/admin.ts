@@ -139,3 +139,61 @@ export async function updateUserFeatures(
   const data = coerceRecord(parsed)
   return normalizeUser(data)
 }
+
+export interface UsageSummaryUser {
+  id: number
+  username: string | null
+  name: string
+  total_tokens: number
+  total_cost_usd: number
+  total_queries: number
+}
+
+export async function fetchUsageSummary(): Promise<UsageSummaryUser[]> {
+  const { parsed } = await adminFetch("/api/admin/usage/summary")
+  const data = coerceRecord(parsed)
+  const rawUsers = Array.isArray(data.users) ? data.users : []
+  return rawUsers.map((u: unknown) => {
+    const r = coerceRecord(u)
+    return {
+      id: Number(r.id),
+      username: r.username === null ? null : String(r.username),
+      name: String(r.name ?? ""),
+      total_tokens: Number(r.total_tokens ?? 0),
+      total_cost_usd: Number(r.total_cost_usd ?? 0),
+      total_queries: Number(r.total_queries ?? 0),
+    }
+  })
+}
+
+export interface UsageOverTimePoint {
+  period: string
+  total_tokens: number
+  total_cost_usd: number
+  total_queries: number
+}
+
+export async function fetchUsageOverTime(groupBy: "day" | "week" | "month" = "day"): Promise<UsageOverTimePoint[]> {
+  const { parsed } = await adminFetch(`/api/admin/usage/over-time?group_by=${groupBy}`)
+  const data = coerceRecord(parsed)
+  const rawData = Array.isArray(data.data) ? data.data : []
+  return rawData.map((d: unknown) => {
+    const r = coerceRecord(d)
+    return {
+      period: String(r.period ?? ""),
+      total_tokens: Number(r.total_tokens ?? 0),
+      total_cost_usd: Number(r.total_cost_usd ?? 0),
+      total_queries: Number(r.total_queries ?? 0),
+    }
+  })
+}
+
+export async function syncUsageCosts(): Promise<{ updated: number; failed: number; processed: number }> {
+  const { parsed } = await adminFetch("/api/admin/usage/sync-costs", { method: "POST" })
+  const data = coerceRecord(parsed)
+  return {
+    updated: Number(data.updated ?? 0),
+    failed: Number(data.failed ?? 0),
+    processed: Number(data.processed ?? 0),
+  }
+}

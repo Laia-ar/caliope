@@ -118,6 +118,24 @@ class SessionQuery(db.Model):
     response_text = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+class UsageLog(db.Model):
+    __tablename__ = 'usage_logs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    query_id = db.Column(db.Integer, db.ForeignKey('queries.id'), nullable=True)
+    session_query_id = db.Column(db.Integer, db.ForeignKey('session_queries.id'), nullable=True)
+    session_participant_id = db.Column(db.Integer, db.ForeignKey('session_participants.id'), nullable=True)
+    generation_id = db.Column(db.String(100), nullable=True, index=True)
+    model_name = db.Column(db.String(200), nullable=False)
+    prompt_tokens = db.Column(db.Integer, nullable=False, default=0)
+    completion_tokens = db.Column(db.Integer, nullable=False, default=0)
+    total_tokens = db.Column(db.Integer, nullable=False, default=0)
+    cost_usd = db.Column(db.Numeric(20, 10), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user = db.relationship('User', lazy=True)
+
 class AvailableModel(db.Model):
     __tablename__ = 'available_models'
 
