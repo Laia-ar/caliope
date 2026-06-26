@@ -17,10 +17,12 @@ import {
   fetchUsageSummary,
   fetchUsageOverTime,
   syncUsageCosts,
+  fetchOpenRouterCredits,
   type AdminStats,
   type AdminUser,
   type UsageSummaryUser,
   type UsageOverTimePoint,
+  type OpenRouterCredits,
 } from "@/lib/admin"
 import { buildBackendUrl } from "@/lib/backend"
 import { AdminModelsSection } from "@/components/admin-models-section"
@@ -63,6 +65,8 @@ export default function AdminPage() {
   const [usageOverTime, setUsageOverTime] = useState<UsageOverTimePoint[]>([])
   const [usageGroupBy, setUsageGroupBy] = useState<"day" | "week" | "month">("day")
   const [isSyncingCosts, setIsSyncingCosts] = useState(false)
+  const [credits, setCredits] = useState<OpenRouterCredits | null>(null)
+  const [isSyncingCredits, setIsSyncingCredits] = useState(false)
 
   const statEntries = useMemo(() => {
     if (!stats) {
@@ -80,11 +84,12 @@ export default function AdminPage() {
         setLoading(true)
         setError(null)
 
-        const [statsResponse, usersResponse, usageResponse, usageTimeResponse] = await Promise.all([
+        const [statsResponse, usersResponse, usageResponse, usageTimeResponse, creditsResponse] = await Promise.all([
           fetchAdminStats(),
           fetchAdminUsers(),
           fetchUsageSummary(),
           fetchUsageOverTime(usageGroupBy),
+          fetchOpenRouterCredits().catch(() => null),
         ])
 
         if (!cancelled) {
@@ -92,6 +97,7 @@ export default function AdminPage() {
           setUsers(usersResponse)
           setUsageUsers(usageResponse)
           setUsageOverTime(usageTimeResponse)
+          setCredits(creditsResponse)
         }
       } catch (err) {
         if (!cancelled) {
@@ -111,6 +117,19 @@ export default function AdminPage() {
       cancelled = true
     }
   }, [usageGroupBy])
+
+  const handleSyncCredits = async () => {
+    try {
+      setIsSyncingCredits(true)
+      const result = await fetchOpenRouterCredits()
+      setCredits(result)
+      toast.success("Saldo de OpenRouter sincronizado")
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "No se pudo sincronizar el saldo")
+    } finally {
+      setIsSyncingCredits(false)
+    }
+  }
 
   const handleSyncCosts = async () => {
     try {
@@ -398,6 +417,36 @@ export default function AdminPage() {
               {isSyncingCosts ? "Sincronizando..." : "Sincronizar costos"}
             </Button>
           </div>
+
+          {credits && (
+            <div className="mb-6 grid gap-4 sm:grid-cols-3">
+              <div className="rounded-xl border border-gray-100 bg-gray-50 p-6">
+                <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Créditos totales</p>
+                <p className="mt-3 text-3xl font-semibold text-gray-900">${credits.total_credits.toFixed(2)}</p>
+              </div>
+              <div className="rounded-xl border border-gray-100 bg-gray-50 p-6">
+                <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Uso acumulado</p>
+                <p className="mt-3 text-3xl font-semibold text-gray-900">${credits.total_usage.toFixed(2)}</p>
+              </div>
+              <div className="rounded-xl border border-gray-100 bg-gray-50 p-6">
+                <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Saldo restante</p>
+                <div className="flex items-center justify-between">
+                  <p className="mt-3 text-3xl font-semibold text-gray-900">${credits.balance_usd.toFixed(2)}</p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleSyncCredits}
+                    disabled={isSyncingCredits}
+                  >
+                    {isSyncingCredits ? "Sincronizando..." : "Sincronizar"}
+                  </Button>
+                </div>
+                <p className="mt-2 text-xs text-gray-400">
+                  Actualizado {new Date(credits.checked_at).toLocaleString()}
+                </p>
+              </div>
+            </div>
+          )}
 
           <div className="mb-6 overflow-hidden rounded-xl border border-gray-200 bg-white">
             <table className="min-w-full divide-y divide-gray-200 text-sm">

@@ -197,3 +197,36 @@ export async function syncUsageCosts(): Promise<{ updated: number; failed: numbe
     processed: Number(data.processed ?? 0),
   }
 }
+
+export interface OpenRouterCredits {
+  total_credits: number
+  total_usage: number
+  balance_usd: number
+  checked_at: string
+}
+
+export async function fetchOpenRouterCredits(): Promise<OpenRouterCredits> {
+  const { parsed } = await adminFetch("/api/admin/openrouter/credits")
+  const data = coerceRecord(parsed)
+  return {
+    total_credits: Number(data.total_credits ?? 0),
+    total_usage: Number(data.total_usage ?? 0),
+    balance_usd: Number(data.balance_usd ?? 0),
+    checked_at: typeof data.checked_at === "string" ? data.checked_at : "",
+  }
+}
+
+export async function fetchOpenRouterCreditsHistory(): Promise<OpenRouterCredits[]> {
+  const { parsed } = await adminFetch("/api/admin/openrouter/credits/history")
+  const data = coerceRecord(parsed)
+  const rawHistory = Array.isArray(data.history) ? data.history : []
+  return rawHistory.map((d: unknown) => {
+    const r = coerceRecord(d)
+    return {
+      total_credits: Number(r.total_credits ?? 0),
+      total_usage: Number(r.total_usage ?? 0),
+      balance_usd: Number(r.balance_usd ?? 0),
+      checked_at: typeof r.checked_at === "string" ? r.checked_at : "",
+    }
+  })
+}

@@ -7,6 +7,33 @@ from extensions import db
 from models import UsageLog
 
 GENERATION_API_URL = "https://openrouter.ai/api/v1/generation"
+CREDITS_API_URL = "https://openrouter.ai/api/v1/credits"
+
+
+def fetch_openrouter_credits() -> dict | None:
+    """Fetch current OpenRouter account credits."""
+    api_key = os.getenv("OPENROUTER_API_KEY")
+    if not api_key:
+        return None
+
+    try:
+        response = requests.get(
+            CREDITS_API_URL,
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=10,
+        )
+        response.raise_for_status()
+        data = response.json().get("data") or {}
+        total_credits = float(data.get("total_credits", 0) or 0)
+        total_usage = float(data.get("total_usage", 0) or 0)
+        return {
+            "total_credits": total_credits,
+            "total_usage": total_usage,
+            "balance_usd": total_credits - total_usage,
+        }
+    except Exception as e:
+        logging.warning(f"Failed to fetch OpenRouter credits: {e}")
+        return None
 
 
 def extract_usage_from_response(response_data: dict) -> dict:

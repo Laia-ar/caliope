@@ -45,6 +45,21 @@ def migrate():
         cursor.execute("CREATE INDEX ix_usage_logs_user_id ON usage_logs (user_id)")
         cursor.execute("CREATE INDEX ix_usage_logs_created_at ON usage_logs (created_at)")
 
+    if table_exists(cursor, "openrouter_balance_snapshots"):
+        print("Table 'openrouter_balance_snapshots' already exists, skipping.")
+    else:
+        print("Creating table 'openrouter_balance_snapshots'...")
+        cursor.execute("""
+            CREATE TABLE openrouter_balance_snapshots (
+                id INTEGER PRIMARY KEY,
+                total_credits NUMERIC(20, 10) NOT NULL,
+                total_usage NUMERIC(20, 10) NOT NULL,
+                balance_usd NUMERIC(20, 10) NOT NULL,
+                checked_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("CREATE INDEX ix_openrouter_balance_checked_at ON openrouter_balance_snapshots (checked_at)")
+
     conn.commit()
     conn.close()
     print("Migration 003 completed successfully.")
