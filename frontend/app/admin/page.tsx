@@ -247,6 +247,25 @@ export default function AdminPage() {
     }
   }
 
+  const handleToggleAdmin = async (user: AdminUser) => {
+    if (togglingUserId === user.id) return
+    setTogglingUserId(user.id)
+    try {
+      const updated = await updateUserFeatures(user.id, {
+        is_admin: !user.is_admin,
+      })
+      setUsers((prev) =>
+        prev.map((u) => (u.id === user.id ? { ...u, is_admin: updated.is_admin } : u))
+      )
+      toast.success(`Usuario ${updated.username} ${updated.is_admin ? "promovido a administrador" : "degradado de administrador"}.`)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "No se pudo actualizar el usuario"
+      toast.error(message)
+    } finally {
+      setTogglingUserId(null)
+    }
+  }
+
   const renderContent = () => {
     if (loading) {
       return (
@@ -345,7 +364,7 @@ export default function AdminPage() {
                   <th className="px-4 py-3 text-left font-medium text-gray-600">Usuario</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-600">Email</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-600">Nombre</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-600">Rol</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-600">Admin</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-600">Docente</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-600">Puede invitar</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-600">Acciones</th>
@@ -364,7 +383,18 @@ export default function AdminPage() {
                       <td className="px-4 py-3 font-medium text-gray-900">{user.username}</td>
                       <td className="px-4 py-3 text-gray-600">{user.email || "—"}</td>
                       <td className="px-4 py-3 text-gray-600">{user.name || "—"}</td>
-                      <td className="px-4 py-3 text-gray-600">{user.is_admin ? "Admin" : "Usuario"}</td>
+                      <td className="px-4 py-3">
+                        <label className="inline-flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 rounded border-gray-300 text-[#1862A2] focus:ring-[#1862A2]"
+                            checked={user.is_admin}
+                            onChange={() => handleToggleAdmin(user)}
+                            disabled={togglingUserId === user.id}
+                          />
+                          <span className="text-gray-600">{user.is_admin ? "Sí" : "No"}</span>
+                        </label>
+                      </td>
                       <td className="px-4 py-3">
                         <Button
                           variant={user.can_create_sessions ? "default" : "outline"}
