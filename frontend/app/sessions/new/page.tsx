@@ -82,7 +82,7 @@ export default function NewSessionPage() {
         custom_prompt_id: promptId ? Number(promptId) : null,
         llm_model_name: model,
         access_level: accessLevel,
-        grade_id: gradeId ? Number(gradeId) : null,
+        grade_id: gradeId && gradeId !== "none" ? Number(gradeId) : null,
       })
       toast.success("Sesión creada")
       router.push(`/sessions/${session.id}`)
@@ -189,12 +189,12 @@ export default function NewSessionPage() {
 
             <div className="space-y-2">
               <Label>Grado (opcional)</Label>
-              <Select value={gradeId} onValueChange={setGradeId}>
+              <Select value={gradeId || "none"} onValueChange={setGradeId}>
                 <SelectTrigger>
                   <SelectValue placeholder={grades.length === 0 ? "No tenés grados asignados" : "Seleccionar grado"} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Sin grado</SelectItem>
+                  <SelectItem value="none">Sin grado</SelectItem>
                   {grades.map((g) => (
                     <SelectItem key={g.id} value={String(g.id)}>
                       {g.name}
