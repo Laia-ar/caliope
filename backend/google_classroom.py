@@ -13,6 +13,7 @@ SCOPES = [
     'https://www.googleapis.com/auth/classroom.courses.readonly',
     'https://www.googleapis.com/auth/classroom.coursework.students.readonly',
     'https://www.googleapis.com/auth/classroom.coursework.students',
+    'https://www.googleapis.com/auth/classroom.courseworkmaterials',
     'https://www.googleapis.com/auth/drive.file',
     'https://www.googleapis.com/auth/documents',
 ]
@@ -122,22 +123,55 @@ def create_google_doc(creds: Credentials, title: str, content_parts: list[dict])
     }
 
 
-def attach_materials_to_coursework(creds: Credentials, course_id: str, coursework_id: str, materials: list[dict]):
-    """Attach Drive files as materials to an existing coursework."""
+def _build_drive_materials(materials: list[dict]) -> list[dict]:
+    """Build Classroom API material objects from Drive file metadata."""
+    return [
+        {
+            'driveFile': {
+                'driveFile': {'id': m['id'], 'title': m['title']},
+                'shareMode': 'VIEW',
+            }
+        }
+        for m in materials
+    ]
+
+
+def create_coursework_with_materials(
+    creds: Credentials,
+    course_id: str,
+    title: str,
+    description: str,
+    materials: list[dict],
+) -> dict:
+    """Create a new CourseWork (assignment) with Drive files as materials."""
     service = build('classroom', 'v1', credentials=creds)
-    coursework = service.courses().courseWork().get(
-        courseId=course_id, id=coursework_id
+    body = {
+        'title': title,
+        'description': description,
+        'workType': 'ASSIGNMENT',
+        'state': 'PUBLISHED',
+        'materials': _build_drive_materials(materials),
+    }
+    return service.courses().courseWork().create(
+        courseId=course_id, body=body
     ).execute()
 
-    existing = coursework.get('materials', [])
-    new_materials = [{'driveFile': {'driveFile': {'id': m['id'], 'title': m['title']}, 'shareMode': 'VIEW'}} for m in materials]
-    coursework['materials'] = existing + new_materials
 
-    # Classroom API only allows updating title, description, state, dueDate, dueTime and materials
-    update_mask = 'materials'
-    service.courses().courseWork().patch(
-        courseId=course_id,
-        id=coursework_id,
-        updateMask=update_mask,
-        body=coursework,
+def create_coursework_material(
+    creds: Credentials,
+    course_id: str,
+    title: str,
+    description: str,
+    materials: list[dict],
+) -> dict:
+    """Create a CourseWorkMaterial (independent material) with Drive files."""
+    service = build('classroom', 'v1', credentials=creds)
+    body = {
+        'title': title,
+        'description': description,
+        'state': 'PUBLISHED',
+        'materials': _build_drive_materials(materials),
+    }
+    return service.courses().courseWorkMaterials().create(
+        courseId=course_id, body=body
     ).execute()
