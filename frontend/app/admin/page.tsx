@@ -18,14 +18,18 @@ import {
   fetchUsageOverTime,
   syncUsageCosts,
   fetchOpenRouterCredits,
+  fetchAdminPrompts,
+  toggleAdminPromptPublic,
   type AdminStats,
   type AdminUser,
   type UsageSummaryUser,
   type UsageOverTimePoint,
   type OpenRouterCredits,
+  type AdminPrompt,
 } from "@/lib/admin"
 import { buildBackendUrl } from "@/lib/backend"
 import { AdminModelsSection } from "@/components/admin-models-section"
+import { AdminInstitutionsSection } from "@/components/admin-institutions-section"
 import {
   LineChart,
   Line,
@@ -68,6 +72,8 @@ export default function AdminPage() {
   const [isSyncingCosts, setIsSyncingCosts] = useState(false)
   const [credits, setCredits] = useState<OpenRouterCredits | null>(null)
   const [isSyncingCredits, setIsSyncingCredits] = useState(false)
+  const [adminPrompts, setAdminPrompts] = useState<AdminPrompt[]>([])
+  const [togglingPromptId, setTogglingPromptId] = useState<number | null>(null)
 
   const statEntries = useMemo(() => {
     if (!stats) {
@@ -85,12 +91,13 @@ export default function AdminPage() {
         setLoading(true)
         setError(null)
 
-        const [statsResponse, usersResponse, usageResponse, usageTimeResponse, creditsResponse] = await Promise.all([
+        const [statsResponse, usersResponse, usageResponse, usageTimeResponse, creditsResponse, promptsResponse] = await Promise.all([
           fetchAdminStats(),
           fetchAdminUsers(),
           fetchUsageSummary(),
           fetchUsageOverTime(usageGroupBy),
           fetchOpenRouterCredits().catch(() => null),
+          fetchAdminPrompts().catch(() => []),
         ])
 
         if (!cancelled) {
@@ -99,6 +106,7 @@ export default function AdminPage() {
           setUsageUsers(usageResponse)
           setUsageOverTime(usageTimeResponse)
           setCredits(creditsResponse)
+          setAdminPrompts(promptsResponse)
         }
       } catch (err) {
         if (!cancelled) {
@@ -118,6 +126,22 @@ export default function AdminPage() {
       cancelled = true
     }
   }, [usageGroupBy])
+
+  const handleTogglePromptPublic = async (prompt: AdminPrompt) => {
+    if (togglingPromptId === prompt.id) return
+    setTogglingPromptId(prompt.id)
+    try {
+      const updated = await toggleAdminPromptPublic(prompt.id, !prompt.public)
+      setAdminPrompts((prev) =>
+        prev.map((p) => (p.id === prompt.id ? { ...p, public: updated.public } : p))
+      )
+      toast.success(`Prompt "${updated.name}" ${updated.public ? "marcado como público" : "desmarcado como público"}`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "No se pudo actualizar el prompt")
+    } finally {
+      setTogglingPromptId(null)
+    }
+  }
 
   const handleSyncCredits = async () => {
     try {
@@ -554,6 +578,53 @@ export default function AdminPage() {
             </div>
           </div>
         </section>
+
+        <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+          <div className="mb-4">
+            <h2 className="text-xl font-semibold text-gray-900">Prompts</h2>
+            <p className="text-sm text-gray-500">Marcá o desmarcá prompts como públicos para todos los usuarios.</p>
+          </div>
+
+          <div className="overflow-hidden rounded-xl border border-gray-100">
+            <table className="min-w-full divide-y divide-gray-200 text-sm">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-3 text-left font-medium text-gray-600">Nombre</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-600">Autor (ID)</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-600">Público</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 bg-white">
+                {adminPrompts.length === 0 ? (
+                  <tr>
+                    <td colSpan={3} className="px-4 py-8 text-center text-gray-500">
+                      No hay prompts cargados.
+                    </td>
+                  </tr>
+                ) : (
+                  adminPrompts.map((prompt) => (
+                    <tr key={prompt.id} className="hover:bg-gray-50/80">
+                      <td className="px-4 py-3 font-medium text-gray-900">{prompt.name}</td>
+                      <td className="px-4 py-3 text-gray-600">{prompt.user_id}</td>
+                      <td className="px-4 py-3">
+                        <Button
+                          variant={prompt.public ? "default" : "outline"}
+                          size="sm"
+                          disabled={togglingPromptId === prompt.id}
+                          onClick={() => handleTogglePromptPublic(prompt)}
+                        >
+                          {prompt.public ? "Sí" : "No"}
+                        </Button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <AdminInstitutionsSection />
 
         <AdminModelsSection />
       </div>

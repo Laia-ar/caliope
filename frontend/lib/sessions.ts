@@ -2,6 +2,12 @@ import { buildBackendUrl } from "./backend"
 
 export type SessionAccessLevel = 'guests' | 'registered' | 'both'
 
+export interface GradeInfo {
+  id: number
+  name: string
+  institution_id: number
+}
+
 export interface Session {
   id: number
   title: string
@@ -15,8 +21,11 @@ export interface Session {
     name: string
     content: string
   } | null
+  grade?: GradeInfo | null
+  grade_id?: number | null
   created_at: string
   updated_at?: string
+  teacher_name?: string
 }
 
 export interface SessionQueryItem {
@@ -34,6 +43,7 @@ export interface CreateSessionData {
   llm_model_name: string
   access_level?: SessionAccessLevel
   is_active?: boolean
+  grade_id?: number | null
 }
 
 async function apiCall(path: string, options: RequestInit = {}) {
@@ -87,6 +97,18 @@ export async function fetchParticipatedSessions(): Promise<Session[]> {
   const result = await apiCall("/api/sessions/participated")
   const data = result && typeof result === "object" ? (result as Record<string, unknown>) : {}
   return Array.isArray(data.sessions) ? (data.sessions as Session[]) : []
+}
+
+export async function fetchStudentSessions(): Promise<Session[]> {
+  const result = await apiCall("/api/sessions/student")
+  const data = result && typeof result === "object" ? (result as Record<string, unknown>) : {}
+  return Array.isArray(data.sessions) ? (data.sessions as Session[]) : []
+}
+
+export async function fetchMyGrades(): Promise<GradeInfo[]> {
+  const result = await apiCall("/api/grades/my-grades")
+  const data = result && typeof result === "object" ? (result as Record<string, unknown>) : {}
+  return Array.isArray(data.grades) ? (data.grades as GradeInfo[]) : []
 }
 
 export async function getSession(id: number): Promise<Session> {
