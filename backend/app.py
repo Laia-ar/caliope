@@ -25,7 +25,8 @@ from google_classroom import (
     list_teacher_courses,
     list_coursework,
     create_google_doc,
-    attach_materials_to_coursework,
+    create_coursework_with_materials,
+    create_coursework_material,
 )
 from authlib.integrations.flask_client import OAuth
 from urllib.parse import urljoin, urlparse
@@ -262,6 +263,7 @@ google = oauth.register(
             'https://www.googleapis.com/auth/classroom.courses.readonly',
             'https://www.googleapis.com/auth/classroom.coursework.students.readonly',
             'https://www.googleapis.com/auth/classroom.coursework.students',
+            'https://www.googleapis.com/auth/classroom.courseworkmaterials',
             'https://www.googleapis.com/auth/drive.file',
             'https://www.googleapis.com/auth/documents',
         ]),
@@ -1873,33 +1875,8 @@ def classroom_coursework(course_id):
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/sessions/<int:session_id>/export-to-classroom', methods=['POST'])
-@login_required
-def export_session_to_classroom(session_id):
-    if not current_user.can_create_sessions and not is_admin_user(current_user):
-        return jsonify({'error': 'Teacher access required'}), 403
-
-    session_obj = ClassroomSession.query.get_or_404(session_id)
-    if session_obj.teacher_id != current_user.id and not is_admin_user(current_user):
-        return jsonify({'error': 'Only the session teacher can export'}), 403
-
-    data = request.get_json()
-    course_id = data.get('course_id')
-    coursework_id = data.get('coursework_id')
-    if not course_id or not coursework_id:
-        return jsonify({'error': 'course_id and coursework_id are required'}), 400
-
-    creds = get_credentials_for_user(current_user)
-    if not creds:
-        return jsonify({'error': 'google_auth_required', 'message': 'Se requiere autorización de Google Classroom'}), 401
-
-    try:
-        refresh_credentials(creds)
-    except Exception as e:
-        app.logger.exception('Failed to refresh Google credentials')
-        return jsonify({'error': 'google_auth_required', 'message': str(e)}), 401
-
-    # Group queries by participant
+def _build_session_export_materials(creds, session_obj, session_id):
+    """Create a Google Doc per participant and return export metadata."""
     participants = (
         SessionParticipant.query
         .filter_by(session_id=session_id)
@@ -1935,19 +1912,104 @@ def export_session_to_classroom(session_id):
         exported.append({'participant_name': participant_name, 'url': doc_info['url']})
         materials.append({'id': doc_info['id'], 'title': doc_info['title']})
 
+    return exported, materials
+
+
+@app.route('/api/sessions/<int:session_id>/export-to-classroom-coursework', methods=['POST'])
+@login_required
+def export_session_to_classroom_coursework(session_id):
+    """Create a new Google Classroom assignment with a doc per participant as materials."""
+    if not current_user.can_create_sessions and not is_admin_user(current_user):
+        return jsonify({'error': 'Teacher access required'}), 403
+
+    session_obj = ClassroomSession.query.get_or_404(session_id)
+    if session_obj.teacher_id != current_user.id and not is_admin_user(current_user):
+        return jsonify({'error': 'Only the session teacher can export'}), 403
+
+    data = request.get_json()
+    course_id = data.get('course_id')
+    title = (data.get('title') or session_obj.title or 'Textos de alumnos').strip()
+    description = (data.get('description') or f"Documentos generados desde la sesión {session_obj.title}.").strip()
+    if not course_id:
+        return jsonify({'error': 'course_id is required'}), 400
+
+    creds = get_credentials_for_user(current_user)
+    if not creds:
+        return jsonify({'error': 'google_auth_required', 'message': 'Se requiere autorización de Google Classroom'}), 401
+
+    try:
+        refresh_credentials(creds)
+    except Exception as e:
+        app.logger.exception('Failed to refresh Google credentials')
+        return jsonify({'error': 'google_auth_required', 'message': str(e)}), 401
+
+    exported, materials = _build_session_export_materials(creds, session_obj, session_id)
     if not materials:
         return jsonify({'error': 'No hay interacciones para exportar'}), 400
 
     try:
-        attach_materials_to_coursework(creds, course_id, coursework_id, materials)
+        coursework = create_coursework_with_materials(
+            creds, course_id, title, description, materials
+        )
     except Exception as e:
-        app.logger.exception('Failed to attach materials to coursework')
-        return jsonify({'error': f'Los documentos se crearon pero no se pudieron adjuntar a la actividad: {e}'}), 500
+        app.logger.exception('Failed to create Classroom coursework with materials')
+        return jsonify({'error': f'Los documentos se crearon pero no se pudo crear la actividad: {e}'}), 500
 
     return jsonify({
         'success': True,
         'exported_count': len(exported),
         'documents': exported,
+        'coursework_id': coursework.get('id'),
+        'coursework_url': coursework.get('alternateLink'),
+    })
+
+
+@app.route('/api/sessions/<int:session_id>/export-to-classroom-materials', methods=['POST'])
+@login_required
+def export_session_to_classroom_materials(session_id):
+    """Create a new Google Classroom CourseWorkMaterial with a doc per participant."""
+    if not current_user.can_create_sessions and not is_admin_user(current_user):
+        return jsonify({'error': 'Teacher access required'}), 403
+
+    session_obj = ClassroomSession.query.get_or_404(session_id)
+    if session_obj.teacher_id != current_user.id and not is_admin_user(current_user):
+        return jsonify({'error': 'Only the session teacher can export'}), 403
+
+    data = request.get_json()
+    course_id = data.get('course_id')
+    title = (data.get('title') or session_obj.title or 'Textos de alumnos').strip()
+    description = (data.get('description') or f"Documentos generados desde la sesión {session_obj.title}.").strip()
+    if not course_id:
+        return jsonify({'error': 'course_id is required'}), 400
+
+    creds = get_credentials_for_user(current_user)
+    if not creds:
+        return jsonify({'error': 'google_auth_required', 'message': 'Se requiere autorización de Google Classroom'}), 401
+
+    try:
+        refresh_credentials(creds)
+    except Exception as e:
+        app.logger.exception('Failed to refresh Google credentials')
+        return jsonify({'error': 'google_auth_required', 'message': str(e)}), 401
+
+    exported, materials = _build_session_export_materials(creds, session_obj, session_id)
+    if not materials:
+        return jsonify({'error': 'No hay interacciones para exportar'}), 400
+
+    try:
+        material = create_coursework_material(
+            creds, course_id, title, description, materials
+        )
+    except Exception as e:
+        app.logger.exception('Failed to create Classroom coursework material')
+        return jsonify({'error': f'Los documentos se crearon pero no se pudo crear el material: {e}'}), 500
+
+    return jsonify({
+        'success': True,
+        'exported_count': len(exported),
+        'documents': exported,
+        'material_id': material.get('id'),
+        'material_url': material.get('alternateLink'),
     })
 
 

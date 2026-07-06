@@ -17,10 +17,9 @@ import {
 } from "@/lib/sessions"
 import {
   fetchClassroomCourses,
-  fetchClassroomCoursework,
-  exportSessionToClassroom,
+  exportSessionToClassroomCoursework,
+  exportSessionToClassroomMaterials,
   type ClassroomCourse,
-  type ClassroomCoursework,
 } from "@/lib/classroom"
 import { renderHtmlContent } from "@/lib/html"
 import {
@@ -53,9 +52,9 @@ export default function SessionDetailPage() {
 
   const [isExportModalOpen, setIsExportModalOpen] = useState(false)
   const [courses, setCourses] = useState<ClassroomCourse[]>([])
-  const [coursework, setCoursework] = useState<ClassroomCoursework[]>([])
   const [selectedCourse, setSelectedCourse] = useState<string>("")
-  const [selectedCoursework, setSelectedCoursework] = useState<string>("")
+  const [exportTitle, setExportTitle] = useState<string>("")
+  const [exportDescription, setExportDescription] = useState<string>("")
   const [isExporting, setIsExporting] = useState(false)
   const [loadingCourses, setLoadingCourses] = useState(false)
 
@@ -114,6 +113,8 @@ export default function SessionDetailPage() {
 
   const handleOpenExport = async () => {
     setIsExportModalOpen(true)
+    setExportTitle(session?.title ? `${session.title} - Textos de alumnos` : "Textos de alumnos")
+    setExportDescription(session?.instructions ? `Consigna: ${session.instructions}` : "Documentos generados desde Caliope.")
     setLoadingCourses(true)
     try {
       const data = await fetchClassroomCourses()
@@ -139,26 +140,41 @@ export default function SessionDetailPage() {
     }
   }
 
-  const handleCourseChange = async (courseId: string) => {
-    setSelectedCourse(courseId)
-    setSelectedCoursework("")
+  const handleExportCoursework = async () => {
+    if (!selectedCourse || !session) return
     try {
-      const data = await fetchClassroomCoursework(courseId)
-      setCoursework(data)
+      setIsExporting(true)
+      const result = await exportSessionToClassroomCoursework(
+        session.id, selectedCourse, exportTitle, exportDescription
+      )
+      toast.success(`Creada actividad con ${result.exported_count} documentos`, {
+        action: result.coursework_url
+          ? { label: "Ver en Classroom", onClick: () => window.open(result.coursework_url, "_blank") }
+          : undefined,
+      })
+      setIsExportModalOpen(false)
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "No se pudieron cargar las actividades")
+      toast.error(err instanceof Error ? err.message : "No se pudo crear la actividad en Classroom")
+    } finally {
+      setIsExporting(false)
     }
   }
 
-  const handleExport = async () => {
-    if (!selectedCourse || !selectedCoursework || !session) return
+  const handleExportMaterials = async () => {
+    if (!selectedCourse || !session) return
     try {
       setIsExporting(true)
-      const result = await exportSessionToClassroom(session.id, selectedCourse, selectedCoursework)
-      toast.success(`Exportados ${result.exported_count} documentos a Classroom`)
+      const result = await exportSessionToClassroomMaterials(
+        session.id, selectedCourse, exportTitle, exportDescription
+      )
+      toast.success(`Creado material con ${result.exported_count} documentos`, {
+        action: result.material_url
+          ? { label: "Ver en Classroom", onClick: () => window.open(result.material_url, "_blank") }
+          : undefined,
+      })
       setIsExportModalOpen(false)
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "No se pudo exportar a Classroom")
+      toast.error(err instanceof Error ? err.message : "No se pudo crear el material en Classroom")
     } finally {
       setIsExporting(false)
     }
@@ -406,13 +422,13 @@ export default function SessionDetailPage() {
           <DialogHeader>
             <DialogTitle>Exportar a Google Classroom</DialogTitle>
             <DialogDescription>
-              Seleccioná el curso y la actividad donde querés adjuntar los documentos de los alumnos.
+              Seleccioná el curso y completá el título y descripción. Podés crear una actividad (CourseWork) con los documentos adjuntos, o un material independiente.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <label className="text-sm font-medium text-gray-700">Curso</label>
-              <Select value={selectedCourse} onValueChange={handleCourseChange} disabled={loadingCourses}>
+              <Select value={selectedCourse} onValueChange={setSelectedCourse} disabled={loadingCourses}>
                 <SelectTrigger>
                   <SelectValue placeholder={loadingCourses ? "Cargando cursos..." : "Seleccioná un curso"} />
                 </SelectTrigger>
@@ -426,32 +442,52 @@ export default function SessionDetailPage() {
               </Select>
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-700">Actividad</label>
-              <Select value={selectedCoursework} onValueChange={setSelectedCoursework} disabled={!selectedCourse || coursework.length === 0}>
-                <SelectTrigger>
-                  <SelectValue placeholder={!selectedCourse ? "Primero seleccioná un curso" : "Seleccioná una actividad"} />
-                </SelectTrigger>
-                <SelectContent>
-                  {coursework.map((cw) => (
-                    <SelectItem key={cw.id} value={cw.id}>
-                      {cw.title}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <label className="text-sm font-medium text-gray-700">Título</label>
+              <input
+                type="text"
+                value={exportTitle}
+                onChange={(e) => setExportTitle(e.target.value)}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                placeholder="Título de la actividad o material"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-700">Descripción</label>
+              <textarea
+                value={exportDescription}
+                onChange={(e) => setExportDescription(e.target.value)}
+                rows={3}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                placeholder="Descripción para los alumnos"
+              />
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsExportModalOpen(false)}>
+          <DialogFooter className="flex-col gap-2 sm:flex-row">
+            <Button variant="outline" onClick={() => setIsExportModalOpen(false)} disabled={isExporting}>
               Cancelar
             </Button>
-            <Button onClick={handleExport} disabled={isExporting || !selectedCourse || !selectedCoursework}>
+            <Button
+              onClick={handleExportMaterials}
+              disabled={isExporting || !selectedCourse || !exportTitle.trim()}
+              variant="secondary"
+            >
               {isExporting ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               ) : (
                 <Upload className="mr-2 h-4 w-4" />
               )}
-              Exportar
+              Crear material
+            </Button>
+            <Button
+              onClick={handleExportCoursework}
+              disabled={isExporting || !selectedCourse || !exportTitle.trim()}
+            >
+              {isExporting ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Upload className="mr-2 h-4 w-4" />
+              )}
+              Crear actividad
             </Button>
           </DialogFooter>
         </DialogContent>
