@@ -1,5 +1,8 @@
 Authlib==1.6.1
 blinker==1.9.0
+google-api-python-client==2.156.0
+google-auth==2.37.0
+google-auth-oauthlib==1.2.1
 certifi==2025.8.3
 cffi==1.17.1
 charset-normalizer==3.4.3
