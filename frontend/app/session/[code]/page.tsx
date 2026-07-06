@@ -13,6 +13,7 @@ import {
   sendSessionQuery,
   type Session,
 } from "@/lib/sessions"
+import { decodeHtmlEntities } from "@/lib/html"
 
 interface ChatMessage {
   id: number
@@ -327,7 +328,7 @@ export default function StudentSessionPage() {
                     </div>
                     <div
                       className="prose prose-sm max-w-none text-gray-700"
-                      dangerouslySetInnerHTML={{ __html: msg.response_text.replace(/\n/g, "<br/>") }}
+                      dangerouslySetInnerHTML={{ __html: decodeHtmlEntities(msg.response_text || "").replace(/\n/g, "<br/>") }}
                     />
                   </div>
                 ))}
