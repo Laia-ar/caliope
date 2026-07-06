@@ -22,6 +22,7 @@ import {
   type ClassroomCourse,
   type ClassroomCoursework,
 } from "@/lib/classroom"
+import { decodeHtmlEntities } from "@/lib/html"
 import {
   Dialog,
   DialogContent,
@@ -386,7 +387,7 @@ export default function SessionDetailPage() {
                           </p>
                           <div
                             className="mt-2 rounded bg-gray-50 p-3 text-sm text-gray-700 prose prose-sm max-w-none"
-                            dangerouslySetInnerHTML={{ __html: q.response_text.replace(/\n/g, "<br/>") }}
+                            dangerouslySetInnerHTML={{ __html: decodeHtmlEntities(q.response_text || "").replace(/\n/g, "<br/>") }}
                           />
                         </div>
                       ))}
