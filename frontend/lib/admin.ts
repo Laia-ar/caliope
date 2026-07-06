@@ -216,6 +216,51 @@ export async function fetchOpenRouterCredits(): Promise<OpenRouterCredits> {
   }
 }
 
+export interface AdminPrompt {
+  id: number
+  name: string
+  content: string
+  public: boolean
+  user_id: number
+  created_at: string
+}
+
+export async function fetchAdminPrompts(): Promise<AdminPrompt[]> {
+  const { parsed } = await adminFetch("/api/admin/prompts")
+  const data = coerceRecord(parsed)
+  const rawPrompts = Array.isArray(data.prompts) ? data.prompts : []
+  return rawPrompts.map((p: unknown) => {
+    const r = coerceRecord(p)
+    return {
+      id: Number(r.id),
+      name: String(r.name ?? ""),
+      content: String(r.content ?? ""),
+      public: r.public === true,
+      user_id: Number(r.user_id ?? 0),
+      created_at: typeof r.created_at === "string" ? r.created_at : "",
+    }
+  })
+}
+
+export async function toggleAdminPromptPublic(
+  promptId: number,
+  isPublic: boolean
+): Promise<AdminPrompt> {
+  const { parsed } = await adminFetch(`/api/admin/prompts/${promptId}/public`, {
+    method: "PUT",
+    body: JSON.stringify({ public: isPublic }),
+  })
+  const data = coerceRecord(parsed)
+  return {
+    id: Number(data.id),
+    name: String(data.name ?? ""),
+    content: String(data.content ?? ""),
+    public: data.public === true,
+    user_id: 0,
+    created_at: "",
+  }
+}
+
 export async function fetchOpenRouterCreditsHistory(): Promise<OpenRouterCredits[]> {
   const { parsed } = await adminFetch("/api/admin/openrouter/credits/history")
   const data = coerceRecord(parsed)

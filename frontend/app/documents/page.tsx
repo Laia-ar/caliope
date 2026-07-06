@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Select, SelectContent, SelectItem } from "@/components/ui/select"
 import { documentsApi, type DocumentListItem } from "@/lib/api"
+import { fetchAuthUser } from "@/lib/auth"
+import { useRouter } from "next/navigation"
 import { DeleteDocumentModal } from "@/components/delete-document-modal"
 import { RenameDocumentModal } from "@/components/rename-document-modal"
 import { DownloadDocumentModal } from "@/components/download-document-modal"
@@ -16,6 +18,7 @@ import { ActionTooltip } from "@/components/action-tooltip"
 import { TimeAgo } from "@/components/time-ago"
 
 export default function DocumentsPage() {
+  const router = useRouter()
   const [documents, setDocuments] = useState<DocumentListItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -75,6 +78,16 @@ export default function DocumentsPage() {
       setLoading(false)
     }
   }
+
+  useEffect(() => {
+    const checkAccess = async () => {
+      const user = await fetchAuthUser()
+      if (!user?.is_teacher) {
+        router.replace("/sessions")
+      }
+    }
+    void checkAccess()
+  }, [router])
 
   useEffect(() => {
     loadDocuments()

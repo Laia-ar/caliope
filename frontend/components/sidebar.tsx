@@ -23,7 +23,7 @@ export function Sidebar({ isCollapsed = false, onToggle }: SidebarProps) {
   const [isLoggingOut, setIsLoggingOut] = useState(false)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [isAdminUser, setIsAdminUser] = useState(false)
-  const [canCreateSessions, setCanCreateSessions] = useState(false)
+  const [isTeacher, setIsTeacher] = useState(false)
   const [canCreateInvites, setCanCreateInvites] = useState(false)
 
   useEffect(() => {
@@ -40,10 +40,10 @@ export function Sidebar({ isCollapsed = false, onToggle }: SidebarProps) {
         }
 
         const data = await response.json().catch(() => null)
-        if (!cancelled && data && typeof data.username === "string") {
+        if (!cancelled && data && typeof data.id === "number") {
           setIsAuthenticated(true)
-          setIsAdminUser(data.username.toLowerCase() === "admin")
-          setCanCreateSessions(!!data.can_create_sessions)
+          setIsAdminUser(data.is_admin === true)
+          setIsTeacher(data.is_teacher === true)
           setCanCreateInvites(data.can_create_invites === true)
         }
       } catch (error) {
@@ -79,7 +79,10 @@ export function Sidebar({ isCollapsed = false, onToggle }: SidebarProps) {
     },
   ]
 
-  let navItems = [...baseNavItems]
+  let navItems: typeof baseNavItems = []
+  if (isTeacher || isAdminUser) {
+    navItems = [...baseNavItems]
+  }
   if (isAuthenticated) {
     navItems.push({
       href: "/sessions",
@@ -88,7 +91,7 @@ export function Sidebar({ isCollapsed = false, onToggle }: SidebarProps) {
       iconAlt: "Mis sesiones",
     })
   }
-  if (canCreateInvites) {
+  if (canCreateInvites || isTeacher || isAdminUser) {
     navItems.push({
       href: "/invitations",
       label: "Invitaciones",

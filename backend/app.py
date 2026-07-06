@@ -17,8 +17,16 @@ from sqlalchemy import event
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from extensions import db
-from models import init_db, User, Document, CustomPrompt, InvitationLink, ClassroomSession, SessionParticipant, SessionQuery, AvailableModel, UsageLog, OpenRouterBalanceSnapshot
+from models import init_db, User, Document, CustomPrompt, InvitationLink, ClassroomSession, SessionParticipant, SessionQuery, AvailableModel, UsageLog, OpenRouterBalanceSnapshot, Institution, Grade, UserGrade
 from openrouter_usage import create_usage_log, sync_missing_costs, fetch_openrouter_credits
+from google_classroom import (
+    get_credentials_for_user,
+    refresh_credentials,
+    list_teacher_courses,
+    list_coursework,
+    create_google_doc,
+    attach_materials_to_coursework,
+)
 from authlib.integrations.flask_client import OAuth
 from urllib.parse import urljoin, urlparse
 
@@ -26,13 +34,23 @@ from urllib.parse import urljoin, urlparse
 ADMIN_USERNAME = os.getenv('ADMIN_USERNAME', 'admin')
 ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD')
 
-def is_admin_user(username: str) -> bool:
-    """Check if the given username is the admin user (env admin or DB flag)."""
-    if not username:
-        return False
-    if username.lower() == ADMIN_USERNAME.lower():
+def is_admin_user(user_or_username=None) -> bool:
+    """Check if the given user/username is an admin (env admin or DB flag)."""
+    if isinstance(user_or_username, User):
+        user = user_or_username
+        if user.is_admin:
+            return True
+        username = user.username
+    else:
+        username = user_or_username
+        user = None
+
+    if username and username.lower() == ADMIN_USERNAME.lower():
         return True
-    user = User.query.filter(db.func.lower(User.username) == username.lower()).first()
+
+    if user is None and username:
+        user = User.query.filter(db.func.lower(User.username) == username.lower()).first()
+
     return bool(user and user.is_admin)
 
 def require_teacher():
@@ -237,7 +255,16 @@ google = oauth.register(
     },
     api_base_url='https://www.googleapis.com/oauth2/v1/',
     client_kwargs={
-        'scope': 'openid email profile',
+        'scope': ' '.join([
+            'openid',
+            'email',
+            'profile',
+            'https://www.googleapis.com/auth/classroom.courses.readonly',
+            'https://www.googleapis.com/auth/classroom.coursework.students.readonly',
+            'https://www.googleapis.com/auth/classroom.coursework.students',
+            'https://www.googleapis.com/auth/drive.file',
+            'https://www.googleapis.com/auth/documents',
+        ]),
         'token_endpoint_auth_method': 'client_secret_post'
     },
     server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
@@ -316,6 +343,26 @@ def login():
         **authorize_kwargs
     )
 
+
+@app.route('/api/auth/google/classroom')
+@login_required
+def google_classroom_auth():
+    """Re-authorize the current user with Google Classroom/Drive scopes."""
+    redirect_to = request.args.get('redirectTo')
+    if redirect_to and redirect_to.startswith('/') and not redirect_to.startswith('//'):
+        session['post_login_redirect'] = redirect_to
+
+    redirect_uri = f"{os.getenv('BACKEND_URL', '')}/login/callback"
+    return google.authorize_redirect(
+        redirect_uri,
+        state=session.get('_state', 'default'),
+        verify=False,
+        access_type='offline',
+        prompt='consent',
+        include_granted_scopes='true',
+    )
+
+
 @app.route('/login/callback')
 def authorize():
     try:
@@ -385,6 +432,25 @@ def authorize():
             db.session.add(user)
             db.session.commit()
         
+        if 'refresh_token' in token:
+            user.google_refresh_token = token['refresh_token']
+
+        # Link pending grade memberships by email
+        pending_memberships = UserGrade.query.filter(
+            db.func.lower(UserGrade.email) == user.email.lower(),
+            UserGrade.user_id.is_(None)
+        ).all()
+        for membership in pending_memberships:
+            membership.user_id = user.id
+
+        # If user is a teacher in any grade, ensure can_create_sessions
+        is_teacher_any = UserGrade.query.filter(
+            db.func.lower(UserGrade.email) == user.email.lower(),
+            UserGrade.role == 'teacher'
+        ).first() is not None
+        if is_teacher_any:
+            user.can_create_sessions = True
+
         db.session.commit()
         login_user(user)
 
@@ -463,7 +529,8 @@ def check_auth():
             'name': user.name,
             'can_create_sessions': user.can_create_sessions,
             'can_create_invites': user.can_create_invites,
-            'is_admin': is_admin_user(user.username)
+            'is_admin': is_admin_user(user),
+            'is_teacher': user.can_create_sessions or is_admin_user(user),
         })
     else:
         return jsonify({'message': 'Not authenticated'}), 401
@@ -540,7 +607,7 @@ def local_login():
 @app.route('/api/admin/dashboard', methods=['GET'])
 @login_required
 def admin_dashboard():
-    if not is_admin_user(current_user.username):
+    if not is_admin_user(current_user):
         return jsonify({'error': 'Admin access required'}), 403
     
     # Get detailed stats
@@ -563,7 +630,7 @@ def admin_dashboard():
 @app.route('/api/admin/usage/sync-costs', methods=['POST'])
 @login_required
 def admin_sync_usage_costs():
-    if not is_admin_user(current_user.username):
+    if not is_admin_user(current_user):
         return jsonify({'error': 'Admin access required'}), 403
     try:
         result = sync_missing_costs(limit=100)
@@ -576,7 +643,7 @@ def admin_sync_usage_costs():
 @app.route('/api/admin/openrouter/credits', methods=['GET'])
 @login_required
 def admin_openrouter_credits():
-    if not is_admin_user(current_user.username):
+    if not is_admin_user(current_user):
         return jsonify({'error': 'Admin access required'}), 403
 
     credits = fetch_openrouter_credits()
@@ -602,7 +669,7 @@ def admin_openrouter_credits():
 @app.route('/api/admin/openrouter/credits/history', methods=['GET'])
 @login_required
 def admin_openrouter_credits_history():
-    if not is_admin_user(current_user.username):
+    if not is_admin_user(current_user):
         return jsonify({'error': 'Admin access required'}), 403
 
     snapshots = OpenRouterBalanceSnapshot.query.order_by(OpenRouterBalanceSnapshot.checked_at.desc()).limit(100).all()
@@ -619,7 +686,7 @@ def admin_openrouter_credits_history():
 @app.route('/api/admin/usage/summary', methods=['GET'])
 @login_required
 def admin_usage_summary():
-    if not is_admin_user(current_user.username):
+    if not is_admin_user(current_user):
         return jsonify({'error': 'Admin access required'}), 403
 
     from sqlalchemy import func
@@ -654,7 +721,7 @@ def admin_usage_summary():
 @app.route('/api/admin/usage/over-time', methods=['GET'])
 @login_required
 def admin_usage_over_time():
-    if not is_admin_user(current_user.username):
+    if not is_admin_user(current_user):
         return jsonify({'error': 'Admin access required'}), 403
 
     group_by = request.args.get('group_by', 'day')
@@ -696,7 +763,7 @@ def admin_usage_over_time():
 @app.route('/api/admin/users', methods=['GET'])
 @login_required
 def admin_users():
-    if not is_admin_user(current_user.username):
+    if not is_admin_user(current_user):
         return jsonify({'error': 'Admin access required'}), 403
     
     users = User.query.all()
@@ -706,7 +773,7 @@ def admin_users():
             'username': user.username,
             'email': user.email,
             'name': user.name,
-            'is_admin': is_admin_user(user.username),
+            'is_admin': is_admin_user(user),
             'can_create_sessions': user.can_create_sessions,
             'can_create_invites': user.can_create_invites
         } for user in users]
@@ -715,7 +782,7 @@ def admin_users():
 @app.route('/api/admin/users/<int:user_id>/features', methods=['PUT'])
 @login_required
 def admin_user_features(user_id):
-    if not is_admin_user(current_user.username):
+    if not is_admin_user(current_user):
         return jsonify({'error': 'Admin access required'}), 403
 
     data = request.get_json()
@@ -737,15 +804,253 @@ def admin_user_features(user_id):
     return jsonify({
         'id': user.id,
         'username': user.username,
-        'is_admin': is_admin_user(user.username),
+        'is_admin': is_admin_user(user),
         'can_create_invites': user.can_create_invites,
         'can_create_sessions': user.can_create_sessions,
     })
 
+
+@app.route('/api/admin/prompts', methods=['GET'])
+@login_required
+def admin_list_prompts():
+    if not is_admin_user(current_user):
+        return jsonify({'error': 'Admin access required'}), 403
+
+    prompts = CustomPrompt.query.order_by(CustomPrompt.name).all()
+    return jsonify({
+        'prompts': [{
+            'id': p.id,
+            'name': p.name,
+            'content': p.content,
+            'public': p.public,
+            'user_id': p.user_id,
+            'created_at': p.created_at.isoformat() if p.created_at else None,
+        } for p in prompts]
+    })
+
+
+@app.route('/api/admin/prompts/<int:prompt_id>/public', methods=['PUT'])
+@login_required
+def admin_toggle_prompt_public(prompt_id):
+    if not is_admin_user(current_user):
+        return jsonify({'error': 'Admin access required'}), 403
+
+    data = request.get_json()
+    prompt = CustomPrompt.query.get_or_404(prompt_id)
+    prompt.public = bool(data.get('public', not prompt.public))
+    db.session.commit()
+
+    return jsonify({
+        'id': prompt.id,
+        'name': prompt.name,
+        'public': prompt.public,
+    })
+
+
+# Institution and grade management endpoints
+
+
+@app.route('/api/admin/institutions', methods=['GET'])
+@login_required
+def admin_list_institutions():
+    if not is_admin_user(current_user):
+        return jsonify({'error': 'Admin access required'}), 403
+    institutions = Institution.query.order_by(Institution.name).all()
+    return jsonify({
+        'institutions': [{
+            'id': i.id,
+            'name': i.name,
+            'created_at': i.created_at.isoformat() if i.created_at else None,
+        } for i in institutions]
+    })
+
+
+@app.route('/api/admin/institutions', methods=['POST'])
+@login_required
+def admin_create_institution():
+    if not is_admin_user(current_user):
+        return jsonify({'error': 'Admin access required'}), 403
+    data = request.get_json()
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({'error': 'Name is required'}), 400
+    if Institution.query.filter_by(name=name).first():
+        return jsonify({'error': 'Institution already exists'}), 409
+    institution = Institution(name=name)
+    db.session.add(institution)
+    db.session.commit()
+    return jsonify({
+        'id': institution.id,
+        'name': institution.name,
+        'created_at': institution.created_at.isoformat(),
+    }), 201
+
+
+@app.route('/api/admin/institutions/<int:institution_id>', methods=['PUT'])
+@login_required
+def admin_update_institution(institution_id):
+    if not is_admin_user(current_user):
+        return jsonify({'error': 'Admin access required'}), 403
+    institution = Institution.query.get_or_404(institution_id)
+    data = request.get_json()
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({'error': 'Name is required'}), 400
+    institution.name = name
+    db.session.commit()
+    return jsonify({
+        'id': institution.id,
+        'name': institution.name,
+    })
+
+
+@app.route('/api/admin/institutions/<int:institution_id>', methods=['DELETE'])
+@login_required
+def admin_delete_institution(institution_id):
+    if not is_admin_user(current_user):
+        return jsonify({'error': 'Admin access required'}), 403
+    institution = Institution.query.get_or_404(institution_id)
+    db.session.delete(institution)
+    db.session.commit()
+    return '', 204
+
+
+@app.route('/api/admin/institutions/<int:institution_id>/grades', methods=['GET'])
+@login_required
+def admin_list_grades(institution_id):
+    if not is_admin_user(current_user):
+        return jsonify({'error': 'Admin access required'}), 403
+    Institution.query.get_or_404(institution_id)
+    grades = Grade.query.filter_by(institution_id=institution_id).order_by(Grade.name).all()
+    return jsonify({
+        'grades': [{
+            'id': g.id,
+            'name': g.name,
+            'created_at': g.created_at.isoformat() if g.created_at else None,
+        } for g in grades]
+    })
+
+
+@app.route('/api/admin/institutions/<int:institution_id>/grades', methods=['POST'])
+@login_required
+def admin_create_grade(institution_id):
+    if not is_admin_user(current_user):
+        return jsonify({'error': 'Admin access required'}), 403
+    Institution.query.get_or_404(institution_id)
+    data = request.get_json()
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({'error': 'Name is required'}), 400
+    if Grade.query.filter_by(institution_id=institution_id, name=name).first():
+        return jsonify({'error': 'Grade already exists in this institution'}), 409
+    grade = Grade(institution_id=institution_id, name=name)
+    db.session.add(grade)
+    db.session.commit()
+    return jsonify({
+        'id': grade.id,
+        'name': grade.name,
+        'institution_id': grade.institution_id,
+    }), 201
+
+
+@app.route('/api/admin/grades/<int:grade_id>', methods=['PUT'])
+@login_required
+def admin_update_grade(grade_id):
+    if not is_admin_user(current_user):
+        return jsonify({'error': 'Admin access required'}), 403
+    grade = Grade.query.get_or_404(grade_id)
+    data = request.get_json()
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({'error': 'Name is required'}), 400
+    existing = Grade.query.filter_by(institution_id=grade.institution_id, name=name).first()
+    if existing and existing.id != grade.id:
+        return jsonify({'error': 'Grade already exists in this institution'}), 409
+    grade.name = name
+    db.session.commit()
+    return jsonify({
+        'id': grade.id,
+        'name': grade.name,
+    })
+
+
+@app.route('/api/admin/grades/<int:grade_id>', methods=['DELETE'])
+@login_required
+def admin_delete_grade(grade_id):
+    if not is_admin_user(current_user):
+        return jsonify({'error': 'Admin access required'}), 403
+    grade = Grade.query.get_or_404(grade_id)
+    db.session.delete(grade)
+    db.session.commit()
+    return '', 204
+
+
+@app.route('/api/admin/grades/<int:grade_id>/members', methods=['GET'])
+@login_required
+def admin_list_grade_members(grade_id):
+    if not is_admin_user(current_user):
+        return jsonify({'error': 'Admin access required'}), 403
+    Grade.query.get_or_404(grade_id)
+    members = UserGrade.query.filter_by(grade_id=grade_id).order_by(UserGrade.email).all()
+    return jsonify({
+        'members': [{
+            'id': m.id,
+            'email': m.email,
+            'role': m.role,
+            'user_id': m.user_id,
+        } for m in members]
+    })
+
+
+@app.route('/api/admin/grades/<int:grade_id>/members', methods=['POST'])
+@login_required
+def admin_add_grade_member(grade_id):
+    if not is_admin_user(current_user):
+        return jsonify({'error': 'Admin access required'}), 403
+    grade = Grade.query.get_or_404(grade_id)
+    data = request.get_json()
+    email = (data.get('email') or '').strip().lower()
+    role = data.get('role', 'student')
+    if not email:
+        return jsonify({'error': 'Email is required'}), 400
+    if role not in ('teacher', 'student'):
+        return jsonify({'error': 'Role must be teacher or student'}), 400
+    existing = UserGrade.query.filter_by(grade_id=grade_id, email=email).first()
+    if existing:
+        return jsonify({'error': 'Email already assigned to this grade'}), 409
+    user = User.query.filter(db.func.lower(User.email) == email).first()
+    member = UserGrade(
+        grade_id=grade_id,
+        email=email,
+        user_id=user.id if user else None,
+        role=role,
+    )
+    db.session.add(member)
+    db.session.commit()
+    return jsonify({
+        'id': member.id,
+        'email': member.email,
+        'role': member.role,
+        'user_id': member.user_id,
+    }), 201
+
+
+@app.route('/api/admin/grades/<int:grade_id>/members/<int:member_id>', methods=['DELETE'])
+@login_required
+def admin_remove_grade_member(grade_id, member_id):
+    if not is_admin_user(current_user):
+        return jsonify({'error': 'Admin access required'}), 403
+    Grade.query.get_or_404(grade_id)
+    member = UserGrade.query.filter_by(id=member_id, grade_id=grade_id).first_or_404()
+    db.session.delete(member)
+    db.session.commit()
+    return '', 204
+
+
 @app.route('/api/admin/download-db', methods=['GET'])
 @login_required
 def download_db():
-    if not is_admin_user(current_user.username):
+    if not is_admin_user(current_user):
         return jsonify({'error': 'Admin access required'}), 403
     
     db_path = os.path.join(app.instance_path, 'app.db')
@@ -760,7 +1065,7 @@ def download_db():
 @login_required
 def upload_db():
     """Upload and replace the SQLite database."""
-    if not is_admin_user(current_user.username):
+    if not is_admin_user(current_user):
         return jsonify({'error': 'Admin access required'}), 403
     
     if 'file' not in request.files:
@@ -1185,15 +1490,27 @@ def create_session():
     prompt_id = data.get('custom_prompt_id')
     model_name = data.get('llm_model_name')
     access_level = data.get('access_level', 'registered').strip().lower()
+    grade_id = data.get('grade_id')
     if access_level not in ('guests', 'registered', 'both'):
         return jsonify({'error': 'Invalid access level'}), 400
     if not title:
         return jsonify({'error': 'Title is required'}), 400
     if not model_name:
         return jsonify({'error': 'Model is required'}), 400
+    if grade_id:
+        grade_id = int(grade_id)
+        # Verify teacher belongs to the grade
+        membership = UserGrade.query.filter_by(
+            grade_id=grade_id,
+            email=current_user.email.lower(),
+            role='teacher',
+        ).first()
+        if not membership and not is_admin_user(current_user):
+            return jsonify({'error': 'No tenés permiso para asignar una sesión a este grado'}), 403
     code = _generate_access_code()
     session_obj = ClassroomSession(
         teacher_id=current_user.id,
+        grade_id=grade_id,
         title=title,
         instructions=instructions,
         custom_prompt_id=prompt_id if prompt_id else None,
@@ -1209,6 +1526,7 @@ def create_session():
         'title': session_obj.title,
         'access_code': session_obj.access_code,
         'access_level': session_obj.access_level,
+        'grade_id': session_obj.grade_id,
         'is_active': session_obj.is_active,
         'created_at': session_obj.created_at.isoformat()
     }), 201
@@ -1220,17 +1538,24 @@ def list_sessions():
     if error:
         return error
     sessions = ClassroomSession.query.filter_by(teacher_id=current_user.id).order_by(ClassroomSession.created_at.desc()).all()
-    return jsonify({
-        'sessions': [{
+    result = []
+    for s in sessions:
+        grade = None
+        if s.grade_id:
+            g = Grade.query.get(s.grade_id)
+            if g:
+                grade = {'id': g.id, 'name': g.name, 'institution_id': g.institution_id}
+        result.append({
             'id': s.id,
             'title': s.title,
             'access_code': s.access_code,
             'access_level': s.access_level,
             'is_active': s.is_active,
             'llm_model_name': s.llm_model_name,
+            'grade': grade,
             'created_at': s.created_at.isoformat()
-        } for s in sessions]
-    })
+        })
+    return jsonify({'sessions': result})
 
 @app.route('/api/sessions/<int:session_id>', methods=['GET'])
 @login_required
@@ -1244,6 +1569,11 @@ def get_session(session_id):
         p = CustomPrompt.query.get(s.custom_prompt_id)
         if p:
             prompt = {'id': p.id, 'name': p.name, 'content': p.content}
+    grade = None
+    if s.grade_id:
+        g = Grade.query.get(s.grade_id)
+        if g:
+            grade = {'id': g.id, 'name': g.name, 'institution_id': g.institution_id}
     return jsonify({
         'id': s.id,
         'title': s.title,
@@ -1252,6 +1582,7 @@ def get_session(session_id):
         'access_level': s.access_level,
         'is_active': s.is_active,
         'llm_model_name': s.llm_model_name,
+        'grade': grade,
         'prompt': prompt,
         'created_at': s.created_at.isoformat(),
         'updated_at': s.updated_at.isoformat()
@@ -1299,6 +1630,18 @@ def update_session(session_id):
         s.access_level = access_level
     if 'is_active' in data:
         s.is_active = bool(data['is_active'])
+    if 'grade_id' in data:
+        new_grade_id = data['grade_id']
+        if new_grade_id:
+            new_grade_id = int(new_grade_id)
+            membership = UserGrade.query.filter_by(
+                grade_id=new_grade_id,
+                email=current_user.email.lower(),
+                role='teacher',
+            ).first()
+            if not membership and not is_admin_user(current_user):
+                return jsonify({'error': 'No tenés permiso para asignar una sesión a este grado'}), 403
+        s.grade_id = new_grade_id
     db.session.commit()
     return jsonify({
         'id': s.id,
@@ -1307,6 +1650,7 @@ def update_session(session_id):
         'access_level': s.access_level,
         'is_active': s.is_active,
         'llm_model_name': s.llm_model_name,
+        'grade_id': s.grade_id,
         'updated_at': s.updated_at.isoformat()
     })
 
@@ -1485,10 +1829,200 @@ def session_query(session_id):
         }
         return jsonify(error_details), 500
 
+@app.route('/api/classroom/courses', methods=['GET'])
+@login_required
+def classroom_courses():
+    if not current_user.can_create_sessions and not is_admin_user(current_user):
+        return jsonify({'error': 'Teacher access required'}), 403
+    creds = get_credentials_for_user(current_user)
+    if not creds:
+        return jsonify({'error': 'google_auth_required', 'message': 'Se requiere autorización de Google Classroom'}), 401
+    try:
+        refresh_credentials(creds)
+        courses = list_teacher_courses(creds)
+        return jsonify({'courses': [{'id': c['id'], 'name': c.get('name', ''), 'section': c.get('section', '')} for c in courses]})
+    except Exception as e:
+        app.logger.exception('Failed to list Google Classroom courses')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/classroom/courses/<course_id>/coursework', methods=['GET'])
+@login_required
+def classroom_coursework(course_id):
+    if not current_user.can_create_sessions and not is_admin_user(current_user):
+        return jsonify({'error': 'Teacher access required'}), 403
+    creds = get_credentials_for_user(current_user)
+    if not creds:
+        return jsonify({'error': 'google_auth_required', 'message': 'Se requiere autorización de Google Classroom'}), 401
+    try:
+        refresh_credentials(creds)
+        items = list_coursework(creds, course_id)
+        return jsonify({
+            'coursework': [
+                {
+                    'id': item['id'],
+                    'title': item.get('title', ''),
+                    'state': item.get('state', ''),
+                    'work_type': item.get('workType', ''),
+                }
+                for item in items
+            ]
+        })
+    except Exception as e:
+        app.logger.exception('Failed to list Google Classroom coursework')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/sessions/<int:session_id>/export-to-classroom', methods=['POST'])
+@login_required
+def export_session_to_classroom(session_id):
+    if not current_user.can_create_sessions and not is_admin_user(current_user):
+        return jsonify({'error': 'Teacher access required'}), 403
+
+    session_obj = ClassroomSession.query.get_or_404(session_id)
+    if session_obj.teacher_id != current_user.id and not is_admin_user(current_user):
+        return jsonify({'error': 'Only the session teacher can export'}), 403
+
+    data = request.get_json()
+    course_id = data.get('course_id')
+    coursework_id = data.get('coursework_id')
+    if not course_id or not coursework_id:
+        return jsonify({'error': 'course_id and coursework_id are required'}), 400
+
+    creds = get_credentials_for_user(current_user)
+    if not creds:
+        return jsonify({'error': 'google_auth_required', 'message': 'Se requiere autorización de Google Classroom'}), 401
+
+    try:
+        refresh_credentials(creds)
+    except Exception as e:
+        app.logger.exception('Failed to refresh Google credentials')
+        return jsonify({'error': 'google_auth_required', 'message': str(e)}), 401
+
+    # Group queries by participant
+    participants = (
+        SessionParticipant.query
+        .filter_by(session_id=session_id)
+        .order_by(SessionParticipant.display_name)
+        .all()
+    )
+
+    exported = []
+    materials = []
+    for participant in participants:
+        queries = SessionQuery.query.filter_by(participant_id=participant.id).order_by(SessionQuery.created_at).all()
+        if not queries:
+            continue
+
+        participant_name = participant.display_name or (participant.user.name if participant.user else 'Anónimo')
+        title = f"{session_obj.title} - {participant_name}"
+
+        content_parts = [
+            {'text': session_obj.title, 'heading': True},
+            {'text': f"Alumno: {participant_name}", 'heading': False},
+        ]
+        if session_obj.instructions:
+            content_parts.append({'text': 'Consigna', 'heading': True})
+            content_parts.append({'text': session_obj.instructions, 'heading': False})
+
+        content_parts.append({'text': 'Interacciones', 'heading': True})
+        for idx, q in enumerate(queries, start=1):
+            content_parts.append({'text': f"Interacción {idx}", 'heading': True})
+            content_parts.append({'text': f"Texto del alumno:\n{q.query_text}", 'heading': False})
+            content_parts.append({'text': f"Respuesta de la herramienta:\n{q.response_text or '(sin respuesta)'}", 'heading': False})
+
+        doc_info = create_google_doc(creds, title, content_parts)
+        exported.append({'participant_name': participant_name, 'url': doc_info['url']})
+        materials.append({'id': doc_info['id'], 'title': doc_info['title']})
+
+    if not materials:
+        return jsonify({'error': 'No hay interacciones para exportar'}), 400
+
+    try:
+        attach_materials_to_coursework(creds, course_id, coursework_id, materials)
+    except Exception as e:
+        app.logger.exception('Failed to attach materials to coursework')
+        return jsonify({'error': f'Los documentos se crearon pero no se pudieron adjuntar a la actividad: {e}'}), 500
+
+    return jsonify({
+        'success': True,
+        'exported_count': len(exported),
+        'documents': exported,
+    })
+
+
+@app.route('/api/grades/my-grades', methods=['GET'])
+@login_required
+def my_grades():
+    """List grades where the current user is a teacher."""
+    if not current_user.can_create_sessions and not is_admin_user(current_user):
+        return jsonify({'error': 'Teacher access required'}), 403
+    grades = (
+        Grade.query
+        .join(UserGrade)
+        .filter(
+            db.func.lower(UserGrade.email) == current_user.email.lower(),
+            UserGrade.role == 'teacher',
+        )
+        .order_by(Grade.name)
+        .all()
+    )
+    return jsonify({
+        'grades': [{
+            'id': g.id,
+            'name': g.name,
+            'institution_id': g.institution_id,
+            'institution_name': g.institution.name,
+        } for g in grades]
+    })
+
+
+@app.route('/api/sessions/student', methods=['GET'])
+@login_required
+def list_student_sessions():
+    """List active sessions assigned to grades where the user is a student."""
+    student_grade_ids = (
+        db.session.query(UserGrade.grade_id)
+        .filter(
+            db.func.lower(UserGrade.email) == current_user.email.lower(),
+            UserGrade.role == 'student',
+        )
+        .subquery()
+    )
+    sessions = (
+        ClassroomSession.query
+        .filter(
+            ClassroomSession.grade_id.in_(student_grade_ids),
+            ClassroomSession.is_active == True,
+        )
+        .order_by(ClassroomSession.created_at.desc())
+        .all()
+    )
+    result = []
+    for s in sessions:
+        prompt = None
+        if s.custom_prompt_id:
+            p = CustomPrompt.query.get(s.custom_prompt_id)
+            if p:
+                prompt = {'id': p.id, 'name': p.name}
+        result.append({
+            'id': s.id,
+            'title': s.title,
+            'instructions': s.instructions,
+            'access_code': s.access_code,
+            'access_level': s.access_level,
+            'llm_model_name': s.llm_model_name,
+            'prompt': prompt,
+            'teacher_name': s.teacher.name if s.teacher else None,
+            'created_at': s.created_at.isoformat(),
+        })
+    return jsonify({'sessions': result})
+
+
 @app.route('/api/admin/users/<int:user_id>/teacher-status', methods=['PUT'])
 @login_required
 def update_teacher_status(user_id):
-    if not is_admin_user(current_user.username):
+    if not is_admin_user(current_user):
         return jsonify({'error': 'Admin access required'}), 403
     data = request.get_json()
     user = User.query.get_or_404(user_id)
@@ -1516,7 +2050,7 @@ def list_active_models():
 @app.route('/api/admin/models', methods=['GET'])
 @login_required
 def admin_list_models():
-    if not is_admin_user(current_user.username):
+    if not is_admin_user(current_user):
         return jsonify({'error': 'Admin access required'}), 403
     models = AvailableModel.query.order_by(AvailableModel.label).all()
     return jsonify({
@@ -1532,7 +2066,7 @@ def admin_list_models():
 @app.route('/api/admin/models', methods=['POST'])
 @login_required
 def admin_create_model():
-    if not is_admin_user(current_user.username):
+    if not is_admin_user(current_user):
         return jsonify({'error': 'Admin access required'}), 403
     data = request.get_json()
     slug = data.get('slug', '').strip()
@@ -1554,7 +2088,7 @@ def admin_create_model():
 @app.route('/api/admin/models/<int:model_id>', methods=['PUT'])
 @login_required
 def admin_update_model(model_id):
-    if not is_admin_user(current_user.username):
+    if not is_admin_user(current_user):
         return jsonify({'error': 'Admin access required'}), 403
     model = AvailableModel.query.get_or_404(model_id)
     data = request.get_json()
@@ -1573,7 +2107,7 @@ def admin_update_model(model_id):
 @app.route('/api/admin/models/<int:model_id>', methods=['DELETE'])
 @login_required
 def admin_delete_model(model_id):
-    if not is_admin_user(current_user.username):
+    if not is_admin_user(current_user):
         return jsonify({'error': 'Admin access required'}), 403
     model = AvailableModel.query.get_or_404(model_id)
     db.session.delete(model)
