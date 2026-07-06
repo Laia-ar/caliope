@@ -22,7 +22,7 @@ import {
   type ClassroomCourse,
   type ClassroomCoursework,
 } from "@/lib/classroom"
-import { decodeHtmlEntities } from "@/lib/html"
+import { renderHtmlContent } from "@/lib/html"
 import {
   Dialog,
   DialogContent,
@@ -382,12 +382,13 @@ export default function SessionDetailPage() {
                               {new Date(q.created_at).toLocaleTimeString()}
                             </span>
                           </div>
-                          <p className="mt-2 text-sm font-medium text-gray-900">
-                            {q.query_text}
-                          </p>
+                          <div
+                            className="mt-2 text-sm font-medium text-gray-900 prose prose-sm max-w-none"
+                            dangerouslySetInnerHTML={{ __html: renderHtmlContent(q.query_text) }}
+                          />
                           <div
                             className="mt-2 rounded bg-gray-50 p-3 text-sm text-gray-700 prose prose-sm max-w-none"
-                            dangerouslySetInnerHTML={{ __html: decodeHtmlEntities(q.response_text || "").replace(/\n/g, "<br/>") }}
+                            dangerouslySetInnerHTML={{ __html: renderHtmlContent(q.response_text) }}
                           />
                         </div>
                       ))}
