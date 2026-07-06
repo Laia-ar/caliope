@@ -6,7 +6,7 @@ import { AppLayout } from "@/components/app-layout"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { ArrowLeft, Loader2, RefreshCw, Users, Copy, Check, ExternalLink } from "lucide-react"
+import { ArrowLeft, Loader2, RefreshCw, Users, Copy, Check, ExternalLink, Upload } from "lucide-react"
 import { toast } from "sonner"
 import {
   getSession,
@@ -15,6 +15,28 @@ import {
   type Session,
   type SessionQueryItem,
 } from "@/lib/sessions"
+import {
+  fetchClassroomCourses,
+  fetchClassroomCoursework,
+  exportSessionToClassroom,
+  type ClassroomCourse,
+  type ClassroomCoursework,
+} from "@/lib/classroom"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 
 export default function SessionDetailPage() {
   const router = useRouter()
@@ -27,6 +49,14 @@ export default function SessionDetailPage() {
   const [queriesLoading, setQueriesLoading] = useState(false)
   const [toggling, setToggling] = useState(false)
   const [copied, setCopied] = useState(false)
+
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false)
+  const [courses, setCourses] = useState<ClassroomCourse[]>([])
+  const [coursework, setCoursework] = useState<ClassroomCoursework[]>([])
+  const [selectedCourse, setSelectedCourse] = useState<string>("")
+  const [selectedCoursework, setSelectedCoursework] = useState<string>("")
+  const [isExporting, setIsExporting] = useState(false)
+  const [loadingCourses, setLoadingCourses] = useState(false)
 
   const loadSession = useCallback(async () => {
     if (!sessionId || isNaN(sessionId)) return
@@ -78,6 +108,58 @@ export default function SessionDetailPage() {
       setTimeout(() => setCopied(false), 2000)
     } catch {
       toast.error("No se pudo copiar el link")
+    }
+  }
+
+  const handleOpenExport = async () => {
+    setIsExportModalOpen(true)
+    setLoadingCourses(true)
+    try {
+      const data = await fetchClassroomCourses()
+      setCourses(data)
+      if (data.length > 0) {
+        setSelectedCourse(data[0].id)
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "No se pudieron cargar los cursos"
+      if (message.includes("google_auth_required")) {
+        toast.error("Se requiere autorización de Google Classroom", {
+          action: {
+            label: "Autorizar",
+            onClick: () =>
+              window.location.href = `/api/auth/google/classroom?redirectTo=${encodeURIComponent(window.location.pathname)}`,
+          },
+        })
+      } else {
+        toast.error(message)
+      }
+    } finally {
+      setLoadingCourses(false)
+    }
+  }
+
+  const handleCourseChange = async (courseId: string) => {
+    setSelectedCourse(courseId)
+    setSelectedCoursework("")
+    try {
+      const data = await fetchClassroomCoursework(courseId)
+      setCoursework(data)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "No se pudieron cargar las actividades")
+    }
+  }
+
+  const handleExport = async () => {
+    if (!selectedCourse || !selectedCoursework || !session) return
+    try {
+      setIsExporting(true)
+      const result = await exportSessionToClassroom(session.id, selectedCourse, selectedCoursework)
+      toast.success(`Exportados ${result.exported_count} documentos a Classroom`)
+      setIsExportModalOpen(false)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "No se pudo exportar a Classroom")
+    } finally {
+      setIsExporting(false)
     }
   }
 
@@ -247,6 +329,15 @@ export default function SessionDetailPage() {
                     </p>
                     <p className="mt-1 text-sm text-gray-700">{session.llm_model_name}</p>
                   </div>
+
+                  {session.grade && (
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                        Grado
+                      </p>
+                      <p className="mt-1 text-sm text-gray-700">{session.grade.name}</p>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </div>
@@ -259,9 +350,15 @@ export default function SessionDetailPage() {
                     <Users className="h-4 w-4" />
                     Interacciones en vivo
                   </CardTitle>
-                  <Button variant="ghost" size="sm" onClick={loadQueries} disabled={queriesLoading}>
-                    <RefreshCw className={`h-4 w-4 ${queriesLoading ? "animate-spin" : ""}`} />
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Button variant="outline" size="sm" onClick={handleOpenExport}>
+                      <Upload className="mr-2 h-4 w-4" />
+                      Exportar a Classroom
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={loadQueries} disabled={queriesLoading}>
+                      <RefreshCw className={`h-4 w-4 ${queriesLoading ? "animate-spin" : ""}`} />
+                    </Button>
+                  </div>
                 </CardHeader>
                 <CardContent>
                   {queries.length === 0 ? (
@@ -287,9 +384,10 @@ export default function SessionDetailPage() {
                           <p className="mt-2 text-sm font-medium text-gray-900">
                             {q.query_text}
                           </p>
-                          <div className="mt-2 rounded bg-gray-50 p-3 text-sm text-gray-700">
-                            {q.response_text}
-                          </div>
+                          <div
+                            className="mt-2 rounded bg-gray-50 p-3 text-sm text-gray-700 prose prose-sm max-w-none"
+                            dangerouslySetInnerHTML={{ __html: q.response_text.replace(/\n/g, "<br/>") }}
+                          />
                         </div>
                       ))}
                     </div>
@@ -300,6 +398,62 @@ export default function SessionDetailPage() {
           </div>
         </div>
       </div>
+
+      <Dialog open={isExportModalOpen} onOpenChange={setIsExportModalOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Exportar a Google Classroom</DialogTitle>
+            <DialogDescription>
+              Seleccioná el curso y la actividad donde querés adjuntar los documentos de los alumnos.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-700">Curso</label>
+              <Select value={selectedCourse} onValueChange={handleCourseChange} disabled={loadingCourses}>
+                <SelectTrigger>
+                  <SelectValue placeholder={loadingCourses ? "Cargando cursos..." : "Seleccioná un curso"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {courses.map((course) => (
+                    <SelectItem key={course.id} value={course.id}>
+                      {course.name} {course.section ? `(${course.section})` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-700">Actividad</label>
+              <Select value={selectedCoursework} onValueChange={setSelectedCoursework} disabled={!selectedCourse || coursework.length === 0}>
+                <SelectTrigger>
+                  <SelectValue placeholder={!selectedCourse ? "Primero seleccioná un curso" : "Seleccioná una actividad"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {coursework.map((cw) => (
+                    <SelectItem key={cw.id} value={cw.id}>
+                      {cw.title}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsExportModalOpen(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={handleExport} disabled={isExporting || !selectedCourse || !selectedCoursework}>
+              {isExporting ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Upload className="mr-2 h-4 w-4" />
+              )}
+              Exportar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AppLayout>
   )
 }

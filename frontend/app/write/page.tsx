@@ -12,6 +12,8 @@ import { toast } from "sonner"
 import { Check, X } from "lucide-react"
 import { buildBackendUrl } from "@/lib/backend"
 import { useNavigationGuard } from "@/hooks/use-navigation-guard";
+import { fetchAuthUser } from "@/lib/auth"
+import { useEffect } from "react"
 
 export default function WritePage() {
   const router = useRouter()
@@ -24,6 +26,16 @@ export default function WritePage() {
 
   const [lastSavedTitle, setLastSavedTitle] = useState("Documento sin título");
   const [lastSavedContent, setLastSavedContent] = useState("");
+
+  useEffect(() => {
+    const checkAccess = async () => {
+      const user = await fetchAuthUser()
+      if (!user?.is_teacher) {
+        router.replace("/sessions")
+      }
+    }
+    void checkAccess()
+  }, [router])
 
   const hasUnsavedChanges =
     documentTitle !== lastSavedTitle || documentContent !== lastSavedContent;

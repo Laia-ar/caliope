@@ -16,9 +16,10 @@ import {
 } from "@/components/ui/select"
 import { ArrowLeft, Loader2 } from "lucide-react"
 import { toast } from "sonner"
-import { createSession, type SessionAccessLevel } from "@/lib/sessions"
+import { createSession, fetchMyGrades, type SessionAccessLevel, type GradeInfo } from "@/lib/sessions"
 import { loadPrompts, type Prompt } from "@/lib/prompts"
 import { loadAvailableModels, type AvailableModel } from "@/lib/models-api"
+import { fetchAuthUser } from "@/lib/auth"
 
 export default function NewSessionPage() {
   const router = useRouter()
@@ -27,21 +28,32 @@ export default function NewSessionPage() {
   const [promptId, setPromptId] = useState<string>("")
   const [model, setModel] = useState<string>("")
   const [accessLevel, setAccessLevel] = useState<SessionAccessLevel>("registered")
+  const [gradeId, setGradeId] = useState<string>("")
+  const [grades, setGrades] = useState<GradeInfo[]>([])
   const [models, setModels] = useState<AvailableModel[]>([])
   const [prompts, setPrompts] = useState<Prompt[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
 
   useEffect(() => {
+    const checkAccess = async () => {
+      const user = await fetchAuthUser()
+      if (!user?.is_teacher) {
+        router.replace("/sessions")
+      }
+    }
+
     const load = async () => {
       try {
         setIsLoading(true)
-        const [promptData, modelData] = await Promise.all([
+        const [promptData, modelData, gradeData] = await Promise.all([
           loadPrompts(),
           loadAvailableModels(),
+          fetchMyGrades(),
         ])
         setPrompts(promptData)
         setModels(modelData)
+        setGrades(gradeData)
         if (modelData.length > 0) {
           setModel(modelData[0].slug)
         }
@@ -51,8 +63,10 @@ export default function NewSessionPage() {
         setIsLoading(false)
       }
     }
+
+    void checkAccess()
     load()
-  }, [])
+  }, [router])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -68,6 +82,7 @@ export default function NewSessionPage() {
         custom_prompt_id: promptId ? Number(promptId) : null,
         llm_model_name: model,
         access_level: accessLevel,
+        grade_id: gradeId ? Number(gradeId) : null,
       })
       toast.success("Sesión creada")
       router.push(`/sessions/${session.id}`)
@@ -169,6 +184,26 @@ export default function NewSessionPage() {
               </Select>
               <p className="text-xs text-gray-500">
                 Definí quién puede ingresar a la sesión con el código.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Grado (opcional)</Label>
+              <Select value={gradeId} onValueChange={setGradeId}>
+                <SelectTrigger>
+                  <SelectValue placeholder={grades.length === 0 ? "No tenés grados asignados" : "Seleccionar grado"} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">Sin grado</SelectItem>
+                  {grades.map((g) => (
+                    <SelectItem key={g.id} value={String(g.id)}>
+                      {g.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-gray-500">
+                Si asignás un grado, los alumnos de ese grado verán la sesión en su panel sin necesidad del código.
               </p>
             </div>
 

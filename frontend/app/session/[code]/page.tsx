@@ -73,7 +73,11 @@ export default function StudentSessionPage() {
       })
       if (response.ok) {
         const data = await response.json()
-        setAuthUser(data)
+        if (data && typeof data.id === "number") {
+          setAuthUser(data)
+        } else {
+          setAuthUser(null)
+        }
       } else {
         setAuthUser(null)
       }

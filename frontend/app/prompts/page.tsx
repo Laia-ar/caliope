@@ -23,6 +23,7 @@ import { toast } from "sonner"
 import { DeleteConfirmationModal } from "@/components/delete-confirmation-modal"
 import { TimeAgo } from "@/components/time-ago"
 import { ActionTooltip } from "@/components/action-tooltip"
+import { fetchAuthUser } from "@/lib/auth"
 
 export default function PromptsPage() {
   const [activeTab, setActiveTab] = useState("propios")
@@ -47,6 +48,13 @@ export default function PromptsPage() {
   }
 
   useEffect(() => {
+    const checkAccess = async () => {
+      const user = await fetchAuthUser()
+      if (!user?.is_teacher) {
+        router.replace("/sessions")
+      }
+    }
+    void checkAccess()
     loadPromptsData()
   }, [])
 

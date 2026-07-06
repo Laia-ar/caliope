@@ -18,6 +18,7 @@ class User(db.Model, UserMixin):
     trial_expires_at = db.Column(db.DateTime, nullable=True)
     is_disabled = db.Column(db.Boolean, default=False)
     is_admin = db.Column(db.Boolean, default=False)
+    google_refresh_token = db.Column(db.String(255), nullable=True)
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -76,11 +77,51 @@ class Query(db.Model):
     response_text = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+class Institution(db.Model):
+    __tablename__ = 'institutions'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(200), nullable=False, unique=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    grades = db.relationship('Grade', backref='institution', lazy=True, cascade='all, delete-orphan')
+
+
+class Grade(db.Model):
+    __tablename__ = 'grades'
+
+    id = db.Column(db.Integer, primary_key=True)
+    institution_id = db.Column(db.Integer, db.ForeignKey('institutions.id'), nullable=False)
+    name = db.Column(db.String(100), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (db.UniqueConstraint('institution_id', 'name', name='uq_institution_grade'),)
+
+    members = db.relationship('UserGrade', backref='grade', lazy=True, cascade='all, delete-orphan')
+    sessions = db.relationship('ClassroomSession', backref='grade', lazy=True)
+
+
+class UserGrade(db.Model):
+    __tablename__ = 'user_grades'
+
+    id = db.Column(db.Integer, primary_key=True)
+    grade_id = db.Column(db.Integer, db.ForeignKey('grades.id'), nullable=False)
+    email = db.Column(db.String(100), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    role = db.Column(db.String(20), nullable=False, default='student')  # 'teacher' or 'student'
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (db.UniqueConstraint('grade_id', 'email', name='uq_grade_email'),)
+
+    user = db.relationship('User', lazy=True)
+
+
 class ClassroomSession(db.Model):
     __tablename__ = 'classroom_sessions'
 
     id = db.Column(db.Integer, primary_key=True)
     teacher_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    grade_id = db.Column(db.Integer, db.ForeignKey('grades.id'), nullable=True)
     title = db.Column(db.String(200), nullable=False)
     instructions = db.Column(db.Text, nullable=False, default='')
     custom_prompt_id = db.Column(db.Integer, db.ForeignKey('custom_prompts.id'), nullable=True)

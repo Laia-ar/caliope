@@ -11,17 +11,27 @@ import {
   listSessions,
   deleteSession,
   fetchParticipatedSessions,
+  fetchStudentSessions,
   type Session,
 } from "@/lib/sessions"
+import { fetchAuthUser } from "@/lib/auth"
 
 export default function SessionsPage() {
   const router = useRouter()
   const [createdSessions, setCreatedSessions] = useState<Session[]>([])
   const [participatedSessions, setParticipatedSessions] = useState<Session[]>([])
+  const [gradeSessions, setGradeSessions] = useState<Session[]>([])
   const [loadingCreated, setLoadingCreated] = useState(true)
   const [loadingParticipated, setLoadingParticipated] = useState(true)
+  const [loadingGradeSessions, setLoadingGradeSessions] = useState(true)
+  const [isTeacher, setIsTeacher] = useState(false)
 
   useEffect(() => {
+    const loadAuth = async () => {
+      const user = await fetchAuthUser()
+      setIsTeacher(user?.is_teacher ?? false)
+    }
+
     const loadCreated = async () => {
       try {
         setLoadingCreated(true)
@@ -46,8 +56,23 @@ export default function SessionsPage() {
       }
     }
 
+    const loadGradeSessions = async () => {
+      try {
+        setLoadingGradeSessions(true)
+        const data = await fetchStudentSessions()
+        setGradeSessions(data)
+      } catch (err) {
+        // Silently ignore for users without grade assignments
+        console.error("Error loading grade sessions", err)
+      } finally {
+        setLoadingGradeSessions(false)
+      }
+    }
+
+    void loadAuth()
     void loadCreated()
     void loadParticipated()
+    void loadGradeSessions()
   }, [])
 
   const handleDelete = async (id: number) => {
@@ -122,7 +147,7 @@ export default function SessionsPage() {
     </Card>
   )
 
-  const isLoading = loadingCreated || loadingParticipated
+  const isLoading = loadingCreated || loadingParticipated || loadingGradeSessions
 
   return (
     <AppLayout>
@@ -135,29 +160,47 @@ export default function SessionsPage() {
                 Gestiona las sesiones que creaste o accedé a las que participás.
               </p>
             </div>
-            <Button onClick={() => router.push("/sessions/new")}>
-              <Plus className="mr-2 h-4 w-4" />
-              Nueva sesión
-            </Button>
+            {isTeacher && (
+              <Button onClick={() => router.push("/sessions/new")}>
+                <Plus className="mr-2 h-4 w-4" />
+                Nueva sesión
+              </Button>
+            )}
           </div>
 
           {isLoading ? (
             <p className="text-sm text-gray-500">Cargando sesiones...</p>
           ) : (
             <div className="space-y-10">
-              {/* Created sessions */}
+              {/* Grade sessions */}
               <section>
-                <h2 className="mb-4 text-lg font-medium text-gray-900">Creadas por mí</h2>
-                {createdSessions.length === 0 ? (
+                <h2 className="mb-4 text-lg font-medium text-gray-900">Sesiones de mis cursos</h2>
+                {gradeSessions.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-gray-300 bg-white p-8 text-center">
-                    <p className="text-gray-600">No tenés sesiones creadas todavía.</p>
+                    <p className="text-gray-600">No tenés sesiones asignadas a tus cursos todavía.</p>
                   </div>
                 ) : (
                   <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    {createdSessions.map((session) => renderSessionCard(session, "manage"))}
+                    {gradeSessions.map((session) => renderSessionCard(session, "join"))}
                   </div>
                 )}
               </section>
+
+              {/* Created sessions */}
+              {isTeacher && (
+                <section>
+                  <h2 className="mb-4 text-lg font-medium text-gray-900">Creadas por mí</h2>
+                  {createdSessions.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-gray-300 bg-white p-8 text-center">
+                      <p className="text-gray-600">No tenés sesiones creadas todavía.</p>
+                    </div>
+                  ) : (
+                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                      {createdSessions.map((session) => renderSessionCard(session, "manage"))}
+                    </div>
+                  )}
+                </section>
+              )}
 
               {/* Participated sessions */}
               <section>
