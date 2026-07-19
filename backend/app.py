@@ -1687,6 +1687,7 @@ def get_session_queries(session_id):
                     participant_name = participant.display_name
         result.append({
             'id': q.id,
+            'participant_id': q.participant_id,
             'query_text': q.query_text,
             'response_text': q.response_text,
             'participant_name': participant_name,

@@ -30,6 +30,7 @@ export interface Session {
 
 export interface SessionQueryItem {
   id: number
+  participant_id: number | null
   query_text: string
   response_text: string
   participant_name: string | null
