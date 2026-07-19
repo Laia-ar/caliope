@@ -38,6 +38,24 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 
+function groupQueriesByParticipant(queries: SessionQueryItem[]): SessionQueryItem[][] {
+  const map = new Map<number | null, SessionQueryItem[]>()
+  for (const q of queries) {
+    const key = q.participant_id ?? null
+    if (!map.has(key)) {
+      map.set(key, [])
+    }
+    map.get(key)!.push(q)
+  }
+  // Sort each group by created_at desc (should already be sorted, but be explicit)
+  const groups = Array.from(map.values()).map((group) =>
+    group.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+  )
+  // Sort groups by latest query date desc
+  groups.sort((a, b) => new Date(b[0].created_at).getTime() - new Date(a[0].created_at).getTime())
+  return groups
+}
+
 export default function SessionDetailPage() {
   const router = useRouter()
   const params = useParams()
@@ -385,29 +403,58 @@ export default function SessionDetailPage() {
                     </div>
                   ) : (
                     <div className="space-y-4">
-                      {queries.map((q) => (
-                        <div
-                          key={q.id}
-                          className="rounded-lg border border-gray-100 bg-white p-4 shadow-sm"
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs font-medium text-gray-500">
-                              {q.participant_name || "Anónimo"}
-                            </span>
-                            <span className="text-xs text-gray-400">
-                              {new Date(q.created_at).toLocaleTimeString()}
-                            </span>
+                      {groupQueriesByParticipant(queries).map((group) => {
+                        const latest = group[0]
+                        const rest = group.slice(1)
+                        return (
+                          <div
+                            key={latest.participant_id ?? latest.id}
+                            className="rounded-lg border border-gray-100 bg-white p-4 shadow-sm"
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-medium text-gray-500">
+                                {latest.participant_name || "Anónimo"}
+                              </span>
+                              <span className="text-xs text-gray-400">
+                                {new Date(latest.created_at).toLocaleTimeString()}
+                              </span>
+                            </div>
+                            <div
+                              className="mt-2 text-sm font-medium text-gray-900 prose prose-sm max-w-none"
+                              dangerouslySetInnerHTML={{ __html: renderHtmlContent(latest.query_text) }}
+                            />
+                            <div
+                              className="mt-2 rounded bg-gray-50 p-3 text-sm text-gray-700 prose prose-sm max-w-none"
+                              dangerouslySetInnerHTML={{ __html: renderHtmlContent(latest.response_text) }}
+                            />
+
+                            {rest.length > 0 && (
+                              <details className="mt-3 rounded-md bg-gray-50 p-3">
+                                <summary className="cursor-pointer text-xs font-medium text-gray-600 hover:text-gray-900">
+                                  Ver {rest.length} interacción{rest.length === 1 ? "" : "es"} anterior{rest.length === 1 ? "" : "es"}
+                                </summary>
+                                <div className="mt-3 space-y-3 border-l-2 border-gray-200 pl-3">
+                                  {rest.map((q) => (
+                                    <div key={q.id} className="text-sm">
+                                      <div className="text-xs text-gray-400">
+                                        {new Date(q.created_at).toLocaleTimeString()}
+                                      </div>
+                                      <div
+                                        className="mt-1 font-medium text-gray-900 prose prose-sm max-w-none"
+                                        dangerouslySetInnerHTML={{ __html: renderHtmlContent(q.query_text) }}
+                                      />
+                                      <div
+                                        className="mt-1 rounded bg-white p-2 text-gray-700 prose prose-sm max-w-none"
+                                        dangerouslySetInnerHTML={{ __html: renderHtmlContent(q.response_text) }}
+                                      />
+                                    </div>
+                                  ))}
+                                </div>
+                              </details>
+                            )}
                           </div>
-                          <div
-                            className="mt-2 text-sm font-medium text-gray-900 prose prose-sm max-w-none"
-                            dangerouslySetInnerHTML={{ __html: renderHtmlContent(q.query_text) }}
-                          />
-                          <div
-                            className="mt-2 rounded bg-gray-50 p-3 text-sm text-gray-700 prose prose-sm max-w-none"
-                            dangerouslySetInnerHTML={{ __html: renderHtmlContent(q.response_text) }}
-                          />
-                        </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   )}
                 </CardContent>
