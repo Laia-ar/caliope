@@ -12,7 +12,7 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith("/invite/") ||
     pathname.startsWith("/_next") ||
     pathname.startsWith("/api") ||
-    pathname === "/favicon.ico" ||
+    pathname.startsWith("/favicon") ||
     pathname.startsWith("/fonts") ||
     pathname === "/join" ||
     pathname.startsWith("/session/")
@@ -32,5 +32,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|auth|login|invite|fonts).*)",]
+  matcher: ["/((?!api|_next/static|_next/image|favicon|auth|login|invite|fonts).*)",]
 }
