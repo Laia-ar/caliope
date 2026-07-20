@@ -47,12 +47,12 @@ export default function PromptsPage() {
     )
   }
 
+  const [canCreatePrompts, setCanCreatePrompts] = useState(true)
+
   useEffect(() => {
     const checkAccess = async () => {
       const user = await fetchAuthUser()
-      if (!user?.is_teacher) {
-        router.replace("/sessions")
-      }
+      setCanCreatePrompts(user?.can_create_prompts ?? true)
     }
     void checkAccess()
     loadPromptsData()
@@ -295,10 +295,12 @@ export default function PromptsPage() {
               </TabsList>
             </Tabs>
 
-            <Button variant="primary" className="py-2 px-4" onClick={() => setIsCreateModalOpen(true)}>
-              <Plus className="w-4 h-4 mr-2" />
-              Crear prompt
-            </Button>
+            {canCreatePrompts && (
+              <Button variant="primary" className="py-2 px-4" onClick={() => setIsCreateModalOpen(true)}>
+                <Plus className="w-4 h-4 mr-2" />
+                Crear prompt
+              </Button>
+            )}
           </div>
 
           {/* Screen table */}
@@ -338,7 +340,7 @@ export default function PromptsPage() {
                       height={48}
                       className="w-12 h-12 opacity-50"
                     />
-                    {activeTab === "propios" && (
+                    {activeTab === "propios" && canCreatePrompts && (
                       <Button variant="outline" onClick={() => setIsCreateModalOpen(true)}>
                         <Plus className="w-4 h-4 mr-2" />
                         Crear mi primer prompt

@@ -13,6 +13,7 @@ class User(db.Model, UserMixin):
     name = db.Column(db.String(100), nullable=False)
     password_hash = db.Column(db.String(128))
     can_create_sessions = db.Column(db.Boolean, default=False)
+    can_create_prompts = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     can_create_invites = db.Column(db.Boolean, default=False)
     trial_expires_at = db.Column(db.DateTime, nullable=True)

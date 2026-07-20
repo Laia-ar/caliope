@@ -62,6 +62,25 @@ def require_teacher():
         return jsonify({'message': 'Teacher access required'}), 403
     return None
 
+
+def is_student_in_any_grade(user) -> bool:
+    """Check if the user is a student in any grade (and not a teacher)."""
+    if not user or not getattr(user, 'email', None):
+        return False
+    email = user.email.lower()
+    is_student = UserGrade.query.filter(
+        db.func.lower(UserGrade.email) == email,
+        UserGrade.role == 'student'
+    ).first() is not None
+    if not is_student:
+        return False
+    is_teacher = UserGrade.query.filter(
+        db.func.lower(UserGrade.email) == email,
+        UserGrade.role == 'teacher'
+    ).first() is not None
+    return not is_teacher
+
+
 def get_admin_user():
     """Get admin user from environment variable or create default."""
     if ADMIN_USERNAME and ADMIN_PASSWORD:
@@ -524,12 +543,16 @@ def check_auth():
     app.logger.info(f"[Auth Check] User: {user}, Authenticated: {user.is_authenticated if hasattr(user, 'is_authenticated') else 'no attr'}")
     
     if hasattr(user, 'is_authenticated') and user.is_authenticated:
+        can_create_prompts = getattr(user, 'can_create_prompts', True)
+        if is_student_in_any_grade(user):
+            can_create_prompts = False
         return jsonify({
             'id': user.id,
             'username': user.username,
             'email': user.email,
             'name': user.name,
             'can_create_sessions': user.can_create_sessions,
+            'can_create_prompts': can_create_prompts,
             'can_create_invites': user.can_create_invites,
             'is_admin': is_admin_user(user),
             'is_teacher': user.can_create_sessions or is_admin_user(user),
@@ -596,12 +619,17 @@ def local_login():
     app.logger.info(f"[Login] User {user.username} logged in successfully")
     app.logger.info(f"[Login] Session cookie settings: domain={app.config.get('SESSION_COOKIE_DOMAIN')}, secure={app.config.get('SESSION_COOKIE_SECURE')}, samesite={app.config.get('SESSION_COOKIE_SAMESITE')}")
 
+    can_create_prompts = getattr(user, 'can_create_prompts', True)
+    if is_student_in_any_grade(user):
+        can_create_prompts = False
+
     return jsonify({
         'id': user.id,
         'username': user.username,
         'email': user.email,
         'name': user.name,
         'can_create_sessions': user.can_create_sessions,
+        'can_create_prompts': can_create_prompts,
         'can_create_invites': user.can_create_invites,
         'is_admin': is_admin_user(username)
     })
@@ -777,6 +805,7 @@ def admin_users():
             'name': user.name,
             'is_admin': is_admin_user(user),
             'can_create_sessions': user.can_create_sessions,
+            'can_create_prompts': getattr(user, 'can_create_prompts', True),
             'can_create_invites': user.can_create_invites
         } for user in users]
     })
@@ -795,6 +824,9 @@ def admin_user_features(user_id):
     if 'can_create_invites' in data:
         user.can_create_invites = bool(data['can_create_invites'])
 
+    if 'can_create_prompts' in data:
+        user.can_create_prompts = bool(data['can_create_prompts'])
+
     if 'is_admin' in data:
         # Prevent self-demotion
         if current_user.id == user.id and not bool(data['is_admin']):
@@ -808,6 +840,7 @@ def admin_user_features(user_id):
         'username': user.username,
         'is_admin': is_admin_user(user),
         'can_create_invites': user.can_create_invites,
+        'can_create_prompts': getattr(user, 'can_create_prompts', True),
         'can_create_sessions': user.can_create_sessions,
     })
 
@@ -1258,6 +1291,10 @@ def get_prompts():
 def create_prompt():
     data = request.get_json()
     user = current_user
+    if is_student_in_any_grade(user) and not is_admin_user(user):
+        return jsonify({'error': 'Los estudiantes no pueden crear prompts'}), 403
+    if not getattr(user, 'can_create_prompts', True) and not is_admin_user(user):
+        return jsonify({'error': 'No tenés permiso para crear prompts'}), 403
     user_id = user.id if user.is_authenticated else 1
     prompt = CustomPrompt(
         user_id=user_id,

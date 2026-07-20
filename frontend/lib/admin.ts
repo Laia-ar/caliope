@@ -17,6 +17,7 @@ export interface AdminUser {
   name: string
   is_admin: boolean
   can_create_sessions: boolean
+  can_create_prompts: boolean
   can_create_invites: boolean
 }
 
@@ -58,6 +59,7 @@ function normalizeUser(raw: unknown): AdminUser {
         ? data.is_admin
         : typeof data.username === "string" && data.username.toLowerCase() === "admin",
     can_create_sessions: typeof data.can_create_sessions === "boolean" ? data.can_create_sessions : false,
+    can_create_prompts: typeof data.can_create_prompts === "boolean" ? data.can_create_prompts : true,
     can_create_invites: typeof data.can_create_invites === "boolean" ? data.can_create_invites : false,
   }
 }
@@ -130,7 +132,7 @@ export async function updateTeacherStatus(userId: number, canCreateSessions: boo
 
 export async function updateUserFeatures(
   userId: number,
-  features: { can_create_invites?: boolean; is_admin?: boolean }
+  features: { can_create_invites?: boolean; can_create_prompts?: boolean; is_admin?: boolean }
 ): Promise<AdminUser> {
   const { parsed } = await adminFetch(`/api/admin/users/${userId}/features`, {
     method: "PUT",
