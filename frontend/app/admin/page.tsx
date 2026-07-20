@@ -65,6 +65,7 @@ export default function AdminPage() {
   const [togglingTeacherId, setTogglingTeacherId] = useState<number | null>(null)
   const [togglingAdminId, setTogglingAdminId] = useState<number | null>(null)
   const [togglingInviteId, setTogglingInviteId] = useState<number | null>(null)
+  const [togglingPromptsId, setTogglingPromptsId] = useState<number | null>(null)
 
   const [usageUsers, setUsageUsers] = useState<UsageSummaryUser[]>([])
   const [usageOverTime, setUsageOverTime] = useState<UsageOverTimePoint[]>([])
@@ -272,6 +273,25 @@ export default function AdminPage() {
     }
   }
 
+  const handleToggleCanCreatePrompts = async (user: AdminUser) => {
+    if (togglingPromptsId === user.id) return
+    setTogglingPromptsId(user.id)
+    try {
+      const updated = await updateUserFeatures(user.id, {
+        can_create_prompts: !user.can_create_prompts,
+      })
+      setUsers((prev) =>
+        prev.map((u) => (u.id === user.id ? { ...u, can_create_prompts: updated.can_create_prompts } : u))
+      )
+      toast.success(`Usuario ${updated.username} actualizado.`)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "No se pudo actualizar el usuario"
+      toast.error(message)
+    } finally {
+      setTogglingPromptsId(null)
+    }
+  }
+
   const handleToggleAdmin = async (user: AdminUser) => {
     if (togglingAdminId === user.id) return
     setTogglingAdminId(user.id)
@@ -391,6 +411,7 @@ export default function AdminPage() {
                   <th className="px-4 py-3 text-left font-medium text-gray-600">Nombre</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-600">Admin</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-600">Docente</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-600">Puede crear prompts</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-600">Puede invitar</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-600">Acciones</th>
                 </tr>
@@ -398,7 +419,7 @@ export default function AdminPage() {
               <tbody className="divide-y divide-gray-100 bg-white">
                 {users.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
+                    <td colSpan={8} className="px-4 py-8 text-center text-gray-500">
                       No hay usuarios para mostrar.
                     </td>
                   </tr>
@@ -426,6 +447,16 @@ export default function AdminPage() {
                           onClick={() => handleToggleTeacher(user)}
                         >
                           {user.can_create_sessions ? "Sí" : "No"}
+                        </Button>
+                      </td>
+                      <td className="px-4 py-3">
+                        <Button
+                          variant={user.can_create_prompts ? "default" : "outline"}
+                          size="sm"
+                          disabled={togglingPromptsId === user.id}
+                          onClick={() => handleToggleCanCreatePrompts(user)}
+                        >
+                          {user.can_create_prompts ? "Sí" : "No"}
                         </Button>
                       </td>
                       <td className="px-4 py-3">
