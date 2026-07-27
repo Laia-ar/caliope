@@ -1,4 +1,5 @@
 import { buildBackendUrl } from "./backend"
+import { apiFetch } from "./api"
 
 export interface Institution {
   id: number
@@ -25,9 +26,8 @@ async function adminFetch(path: string, options: RequestInit = {}): Promise<unkn
   if (options.body && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json")
   }
-  const response = await fetch(buildBackendUrl(path), {
+  const response = await apiFetch(path, {
     ...options,
-    credentials: "include",
     headers,
   })
   const data = await response.json().catch(() => ({}))

@@ -1,4 +1,5 @@
 import { buildBackendUrl } from "./backend"
+import { apiFetch } from "./api"
 
 export interface ClassroomCourse {
   id: string
@@ -24,9 +25,8 @@ export interface ExportResult {
 }
 
 async function classroomFetch(path: string, options: RequestInit = {}): Promise<unknown> {
-  const response = await fetch(buildBackendUrl(path), {
+  const response = await apiFetch(path, {
     ...options,
-    credentials: "include",
     headers: {
       "Content-Type": "application/json",
       ...options.headers,

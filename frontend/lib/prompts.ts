@@ -1,4 +1,5 @@
 import { buildBackendUrl } from "./backend"
+import { apiFetch } from "./api"
 
 export interface Prompt {
   id: string
@@ -75,10 +76,9 @@ async function fetchJson(path: string, options: RequestInit = {}) {
 
   const { headers: _ignored, ...rest } = options
 
-  const response = await fetch(buildBackendUrl(path), {
+  const response = await apiFetch(path, {
     ...rest,
     headers,
-    credentials: "include",
   })
 
   const text = await response.text()
