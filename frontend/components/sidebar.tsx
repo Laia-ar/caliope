@@ -9,6 +9,7 @@ import { LogOut, ChevronLeft, ChevronRight } from "lucide-react"
 
 import { HelpModal } from "./help-modal"
 import Image from "next/image"
+import { apiFetch, UnauthorizedError } from "@/lib/api"
 
 interface SidebarProps {
   isCollapsed?: boolean
@@ -31,9 +32,7 @@ export function Sidebar({ isCollapsed = false, onToggle }: SidebarProps) {
 
     const checkAuth = async () => {
       try {
-        const response = await fetch("/api/check-auth", {
-          credentials: "include",
-        })
+        const response = await apiFetch("/api/check-auth")
 
         if (!response.ok) {
           return
@@ -47,6 +46,9 @@ export function Sidebar({ isCollapsed = false, onToggle }: SidebarProps) {
           setCanCreateInvites(data.can_create_invites === true)
         }
       } catch (error) {
+        if (error instanceof UnauthorizedError) {
+          return
+        }
         // Ignored on purpose: sidebar remains without admin link if request fails
       }
     }

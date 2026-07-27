@@ -1,5 +1,34 @@
 import { buildBackendUrl } from "./backend"
 
+export class UnauthorizedError extends Error {
+  constructor(message = "Not authenticated") {
+    super(message)
+    this.name = "UnauthorizedError"
+  }
+}
+
+/**
+ * Wrapper around fetch that handles 401 responses globally.
+ * On 401 it redirects the browser to /auth so the user is logged out cleanly.
+ */
+export async function apiFetch(path: string, options: RequestInit = {}): Promise<Response> {
+  const url = path.startsWith("http") ? path : buildBackendUrl(path)
+  const response = await fetch(url, {
+    ...options,
+    credentials: "include",
+  })
+
+  if (response.status === 401) {
+    if (typeof window !== "undefined") {
+      // Redirect to login page; this clears any broken client-side state
+      window.location.href = "/auth"
+    }
+    throw new UnauthorizedError()
+  }
+
+  return response
+}
+
 export interface DocumentListItem {
   id: number
   title: string
@@ -118,9 +147,8 @@ async function apiCall(path: string, options: RequestInit = {}) {
 
   const { headers: _ignored, ...rest } = options
 
-  const response = await fetch(buildBackendUrl(path), {
+  const response = await apiFetch(path, {
     ...rest,
-    credentials: "include",
     headers,
   })
 

@@ -1,4 +1,5 @@
 import { buildBackendUrl } from "./backend"
+import { apiFetch } from "./api"
 
 export interface AdminStats {
   total_users?: number
@@ -84,9 +85,8 @@ async function adminFetch(path: string, options: RequestInit = {}): Promise<{ pa
 
   const { headers: _ignored, ...rest } = options
 
-  const response = await fetch(buildBackendUrl(path), {
+  const response = await apiFetch(path, {
     ...rest,
-    credentials: "include",
     headers,
   })
 

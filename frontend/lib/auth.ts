@@ -1,4 +1,4 @@
-import { buildBackendUrl } from "./backend"
+import { apiFetch, UnauthorizedError } from "./api"
 
 export interface AuthUser {
   id: number
@@ -14,9 +14,7 @@ export interface AuthUser {
 
 export async function fetchAuthUser(): Promise<AuthUser | null> {
   try {
-    const response = await fetch(buildBackendUrl("/api/check-auth"), {
-      credentials: "include",
-    })
+    const response = await apiFetch("/api/check-auth")
     if (!response.ok) return null
     const data = await response.json()
     return {
@@ -30,7 +28,10 @@ export async function fetchAuthUser(): Promise<AuthUser | null> {
       is_admin: data.is_admin === true,
       is_teacher: data.is_teacher === true,
     }
-  } catch {
+  } catch (err) {
+    if (err instanceof UnauthorizedError) {
+      return null
+    }
     return null
   }
 }

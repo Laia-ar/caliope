@@ -1,4 +1,5 @@
 import { buildBackendUrl } from "./backend"
+import { apiFetch } from "./api"
 
 export type SessionAccessLevel = 'guests' | 'registered' | 'both'
 
@@ -52,9 +53,8 @@ async function apiCall(path: string, options: RequestInit = {}) {
   if (options.body && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json")
   }
-  const response = await fetch(buildBackendUrl(path), {
+  const response = await apiFetch(path, {
     ...options,
-    credentials: "include",
     headers,
   })
   const text = await response.text()
