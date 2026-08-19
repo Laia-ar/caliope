@@ -130,6 +130,9 @@ class ClassroomSession(db.Model):
     access_code = db.Column(db.String(10), unique=True, nullable=False, index=True)
     access_level = db.Column(db.String(20), nullable=False, default='registered')
     is_active = db.Column(db.Boolean, default=True)
+    classroom_course_id = db.Column(db.String(64), nullable=True)
+    classroom_coursework_id = db.Column(db.String(64), nullable=True)
+    classroom_coursework_url = db.Column(db.String(512), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -160,6 +163,8 @@ class SessionParticipant(db.Model):
     display_name = db.Column(db.String(100), nullable=True)
     token = db.Column(db.String(36), unique=True, nullable=False)
     current_stage_id = db.Column(db.Integer, db.ForeignKey('session_stages.id'), nullable=True)
+    submitted_at = db.Column(db.DateTime, nullable=True)
+    submission_url = db.Column(db.String(512), nullable=True)
     joined_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     user = db.relationship('User', lazy=True)

@@ -17,6 +17,7 @@ from sqlalchemy import event
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from extensions import db
+from googleapiclient.errors import HttpError
 from models import init_db, User, Document, CustomPrompt, InvitationLink, ClassroomSession, SessionParticipant, SessionQuery, SessionStage, AvailableModel, UsageLog, OpenRouterBalanceSnapshot, Institution, Grade, UserGrade
 from openrouter_usage import create_usage_log, sync_missing_costs, fetch_openrouter_credits
 from google_classroom import (
@@ -27,6 +28,10 @@ from google_classroom import (
     create_google_doc,
     create_coursework_with_materials,
     create_coursework_material,
+    create_coursework,
+    list_my_submissions,
+    add_submission_drive_attachment,
+    turn_in_submission,
 )
 from authlib.integrations.flask_client import OAuth
 from urllib.parse import urljoin, urlparse
@@ -282,6 +287,7 @@ google = oauth.register(
             'https://www.googleapis.com/auth/classroom.courses.readonly',
             'https://www.googleapis.com/auth/classroom.coursework.students.readonly',
             'https://www.googleapis.com/auth/classroom.coursework.students',
+            'https://www.googleapis.com/auth/classroom.coursework.me',
             'https://www.googleapis.com/auth/classroom.courseworkmaterials',
             'https://www.googleapis.com/auth/drive.file',
             'https://www.googleapis.com/auth/documents',
@@ -1652,6 +1658,16 @@ def get_session(session_id):
         g = Grade.query.get(s.grade_id)
         if g:
             grade = {'id': g.id, 'name': g.name, 'institution_id': g.institution_id}
+    submissions = []
+    for p in s.participants:
+        if p.submitted_at:
+            name = p.display_name or (p.user.name if p.user else None) or 'Anónimo'
+            submissions.append({
+                'participant_id': p.id,
+                'participant_name': name,
+                'submitted_at': p.submitted_at.isoformat(),
+                'submission_url': p.submission_url,
+            })
     return jsonify({
         'id': s.id,
         'title': s.title,
@@ -1663,6 +1679,9 @@ def get_session(session_id):
         'grade': grade,
         'prompt': prompt,
         'stages': _serialize_session_stages(s),
+        'classroom_coursework_id': s.classroom_coursework_id,
+        'classroom_coursework_url': s.classroom_coursework_url,
+        'submissions': submissions,
         'created_at': s.created_at.isoformat(),
         'updated_at': s.updated_at.isoformat()
     })
@@ -1869,13 +1888,16 @@ def join_session():
             'access_level': s.access_level,
             'llm_model_name': s.llm_model_name,
             'prompt': prompt,
-            'stages': _serialize_session_stages(s)
+            'stages': _serialize_session_stages(s),
+            'classroom_linked': bool(s.classroom_coursework_id)
         },
         'participant_token': token,
         'participant': {
             'id': participant.id,
             'display_name': participant.display_name,
-            'current_stage_id': participant.current_stage_id
+            'current_stage_id': participant.current_stage_id,
+            'submitted_at': participant.submitted_at.isoformat() if participant.submitted_at else None,
+            'submission_url': participant.submission_url
         }
     })
 
@@ -1891,7 +1913,9 @@ def get_participant_me(session_id):
     return jsonify({
         'id': participant.id,
         'display_name': display_name,
-        'current_stage_id': participant.current_stage_id
+        'current_stage_id': participant.current_stage_id,
+        'submitted_at': participant.submitted_at.isoformat() if participant.submitted_at else None,
+        'submission_url': participant.submission_url
     })
 
 @app.route('/api/sessions/<int:session_id>/participant/stage', methods=['POST'])
@@ -1907,6 +1931,114 @@ def set_participant_stage(session_id):
     participant.current_stage_id = stage.id
     db.session.commit()
     return jsonify({'id': participant.id, 'current_stage_id': participant.current_stage_id})
+
+@app.route('/api/sessions/<int:session_id>/link-classroom', methods=['POST'])
+@login_required
+def link_session_classroom(session_id):
+    """Link a session to a new Classroom coursework so students can submit to it."""
+    error = require_teacher()
+    if error:
+        return error
+    s = ClassroomSession.query.filter_by(id=session_id, teacher_id=current_user.id).first_or_404()
+    if s.classroom_coursework_id:
+        return jsonify({'error': 'La tarea ya está vinculada a Classroom'}), 400
+    data = request.get_json() or {}
+    course_id = data.get('course_id')
+    if not course_id:
+        return jsonify({'error': 'course_id is required'}), 400
+    title = (data.get('title') or s.title).strip()
+    description = (data.get('description') or s.instructions or '').strip()
+
+    creds = get_credentials_for_user(current_user)
+    if not creds:
+        return jsonify({'error': 'google_auth_required', 'message': 'Se requiere autorización de Google Classroom'}), 401
+    try:
+        refresh_credentials(creds)
+    except Exception as e:
+        app.logger.exception('Failed to refresh Google credentials')
+        return jsonify({'error': 'google_auth_required', 'message': str(e)}), 401
+    try:
+        coursework = create_coursework(creds, course_id, title, description)
+    except Exception as e:
+        app.logger.exception('Failed to create Classroom coursework')
+        return jsonify({'error': f'No se pudo crear la actividad en Classroom: {e}'}), 500
+
+    s.classroom_course_id = str(course_id)
+    s.classroom_coursework_id = str(coursework.get('id'))
+    s.classroom_coursework_url = coursework.get('alternateLink')
+    db.session.commit()
+    return jsonify({
+        'success': True,
+        'classroom_course_id': s.classroom_course_id,
+        'classroom_coursework_id': s.classroom_coursework_id,
+        'classroom_coursework_url': s.classroom_coursework_url,
+    })
+
+@app.route('/api/sessions/<int:session_id>/submit', methods=['POST'])
+@login_required
+def submit_session_work(session_id):
+    """Student submits their text: a doc is created in THEIR Drive, attached to
+    their own Classroom submission and turned in."""
+    s = ClassroomSession.query.get_or_404(session_id)
+    if not s.classroom_coursework_id:
+        return jsonify({'error': 'Esta tarea no está vinculada a Classroom'}), 400
+    token = request.headers.get('X-Participant-Token', '')
+    participant = SessionParticipant.query.filter_by(token=token, session_id=session_id).first() if token else None
+    if not participant:
+        return jsonify({'error': 'Invalid participant token'}), 401
+    data = request.get_json() or {}
+    text = (data.get('text') or '').strip()
+    if not text:
+        return jsonify({'error': 'No hay texto para entregar'}), 400
+
+    creds = get_credentials_for_user(current_user)
+    if not creds:
+        return jsonify({'error': 'google_auth_required', 'message': 'Necesitás autorizar tu cuenta de Google para entregar'}), 401
+    try:
+        refresh_credentials(creds)
+    except Exception as e:
+        app.logger.exception('Failed to refresh Google credentials')
+        return jsonify({'error': 'google_auth_required', 'message': str(e)}), 401
+
+    display_name = participant.display_name or current_user.name
+    stages = SessionStage.query.filter_by(session_id=s.id).order_by(SessionStage.position).all()
+    content_parts = [{'text': s.title, 'heading': True}]
+    if stages:
+        for stage in stages:
+            if stage.instructions:
+                content_parts.append({'text': f"Consigna (etapa {stage.position}): {stage.instructions}"})
+    elif s.instructions:
+        content_parts.append({'text': f"Consigna: {s.instructions}"})
+    content_parts.append({'text': ''})
+    content_parts.append({'text': text})
+
+    try:
+        doc = create_google_doc(creds, f"{s.title} - {display_name}", content_parts, share_anyone=False)
+        submissions = list_my_submissions(creds, s.classroom_course_id, s.classroom_coursework_id)
+        if not submissions:
+            return jsonify({'error': 'No encontramos una entrega tuya en Classroom. ¿Estás inscripto en el curso?'}), 400
+        submission_id = submissions[0]['id']
+        add_submission_drive_attachment(
+            creds, s.classroom_course_id, s.classroom_coursework_id, submission_id, doc['id'], doc['title']
+        )
+        turn_in_submission(creds, s.classroom_course_id, s.classroom_coursework_id, submission_id)
+    except HttpError as e:
+        app.logger.exception('Classroom submit failed')
+        if getattr(e, 'resp', None) is not None and e.resp.status in (401, 403):
+            return jsonify({'error': 'google_auth_required', 'message': 'Necesitás volver a autorizar tu cuenta de Google con los nuevos permisos'}), 401
+        return jsonify({'error': f'Error de Classroom: {e}'}), 500
+    except Exception as e:
+        app.logger.exception('Classroom submit failed')
+        return jsonify({'error': f'No se pudo entregar: {e}'}), 500
+
+    participant.submitted_at = datetime.utcnow()
+    participant.submission_url = doc['url']
+    db.session.commit()
+    return jsonify({
+        'success': True,
+        'submitted_at': participant.submitted_at.isoformat(),
+        'submission_url': doc['url'],
+    })
 
 @app.route('/api/sessions/by-code/<code>', methods=['GET'])
 def get_session_by_code(code):
@@ -1925,7 +2057,8 @@ def get_session_by_code(code):
         'access_level': s.access_level,
         'llm_model_name': s.llm_model_name,
         'prompt': prompt,
-        'stages': _serialize_session_stages(s)
+        'stages': _serialize_session_stages(s),
+        'classroom_linked': bool(s.classroom_coursework_id)
     })
 
 @app.route('/api/sessions/<int:session_id>/query', methods=['POST'])

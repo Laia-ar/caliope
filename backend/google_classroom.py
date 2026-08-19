@@ -13,6 +13,7 @@ SCOPES = [
     'https://www.googleapis.com/auth/classroom.courses.readonly',
     'https://www.googleapis.com/auth/classroom.coursework.students.readonly',
     'https://www.googleapis.com/auth/classroom.coursework.students',
+    'https://www.googleapis.com/auth/classroom.coursework.me',
     'https://www.googleapis.com/auth/classroom.courseworkmaterials',
     'https://www.googleapis.com/auth/drive.file',
     'https://www.googleapis.com/auth/documents',
@@ -66,11 +67,13 @@ def list_coursework(creds: Credentials, course_id: str):
     return items
 
 
-def create_google_doc(creds: Credentials, title: str, content_parts: list[dict]) -> dict:
+def create_google_doc(creds: Credentials, title: str, content_parts: list[dict], share_anyone: bool = True) -> dict:
     """Create a Google Doc with the given title and append content.
 
     content_parts is a list of dicts like:
       {'text': '...', 'heading': True|False}
+    share_anyone adds an anyone-with-the-link writer permission; disable it
+    for student-owned docs (Classroom handles sharing on turn-in).
     """
     docs_service = build('docs', 'v1', credentials=creds)
     drive_service = build('drive', 'v3', credentials=creds)
@@ -110,11 +113,12 @@ def create_google_doc(creds: Credentials, title: str, content_parts: list[dict])
         ).execute()
 
     # Make it editable by anyone with the link
-    drive_service.permissions().create(
-        fileId=doc_id,
-        body={'type': 'anyone', 'role': 'writer'},
-        fields='id'
-    ).execute()
+    if share_anyone:
+        drive_service.permissions().create(
+            fileId=doc_id,
+            body={'type': 'anyone', 'role': 'writer'},
+            fields='id'
+        ).execute()
 
     return {
         'id': doc_id,
@@ -174,4 +178,55 @@ def create_coursework_material(
     }
     return service.courses().courseWorkMaterials().create(
         courseId=course_id, body=body
+    ).execute()
+
+
+def create_coursework(creds: Credentials, course_id: str, title: str, description: str) -> dict:
+    """Create a plain CourseWork (assignment) with no class-level materials."""
+    service = build('classroom', 'v1', credentials=creds)
+    body = {
+        'title': title,
+        'description': description,
+        'workType': 'ASSIGNMENT',
+        'state': 'PUBLISHED',
+    }
+    return service.courses().courseWork().create(
+        courseId=course_id, body=body
+    ).execute()
+
+
+def list_my_submissions(creds: Credentials, course_id: str, coursework_id: str) -> list[dict]:
+    """List the current user's submissions for a coursework (student credentials)."""
+    service = build('classroom', 'v1', credentials=creds)
+    response = service.courses().courseWork().studentSubmissions().list(
+        courseId=course_id, courseWorkId=coursework_id, userId='me'
+    ).execute()
+    return response.get('studentSubmissions', [])
+
+
+def add_submission_drive_attachment(
+    creds: Credentials,
+    course_id: str,
+    coursework_id: str,
+    submission_id: str,
+    file_id: str,
+    title: str,
+) -> dict:
+    """Attach a Drive file to a student's own submission."""
+    service = build('classroom', 'v1', credentials=creds)
+    body = {
+        'addAttachments': [
+            {'driveFile': {'driveFile': {'id': file_id, 'title': title}}}
+        ]
+    }
+    return service.courses().courseWork().studentSubmissions().modifyAttachments(
+        courseId=course_id, courseWorkId=coursework_id, id=submission_id, body=body
+    ).execute()
+
+
+def turn_in_submission(creds: Credentials, course_id: str, coursework_id: str, submission_id: str) -> dict:
+    """Turn in a student's own submission (student credentials required)."""
+    service = build('classroom', 'v1', credentials=creds)
+    return service.courses().courseWork().studentSubmissions().turnIn(
+        courseId=course_id, courseWorkId=coursework_id, id=submission_id, body={}
     ).execute()

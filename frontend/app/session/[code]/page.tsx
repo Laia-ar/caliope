@@ -7,13 +7,14 @@ import { Badge } from "@/components/ui/badge"
 import { TipTapEditor } from "@/components/tiptap-editor"
 import { QuestionCard } from "@/components/question-card"
 import { toast } from "sonner"
-import { Send, Loader2, BookOpen, LogIn, ChevronLeft, ChevronRight } from "lucide-react"
+import { Send, Loader2, BookOpen, LogIn, ChevronLeft, ChevronRight, Upload, CheckCircle2 } from "lucide-react"
 import {
   getSessionByCode,
   joinSession,
   sendSessionQuery,
   getParticipantMe,
   setParticipantStage,
+  submitSessionWork,
   type Session,
   type ParticipantInfo,
 } from "@/lib/sessions"
@@ -60,6 +61,9 @@ export default function StudentSessionPage() {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null)
   const [currentStageId, setCurrentStageId] = useState<number | null>(null)
   const [changingStage, setChangingStage] = useState(false)
+  const [submitted, setSubmitted] = useState<string | null>(null)
+  const [submissionUrl, setSubmissionUrl] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
 
   const loadSession = useCallback(async () => {
     try {
@@ -163,6 +167,8 @@ export default function StudentSessionPage() {
       setToken(result.participant_token)
       setParticipant(result.participant)
       setCurrentStageId(result.participant.current_stage_id)
+      setSubmitted(result.participant.submitted_at ?? null)
+      setSubmissionUrl(result.participant.submission_url ?? null)
       setSession(result.session)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "No se pudo unir a la tarea")
@@ -176,6 +182,8 @@ export default function StudentSessionPage() {
     setToken(pendingToken)
     setParticipant(storedParticipant)
     setCurrentStageId(storedParticipant.current_stage_id)
+    setSubmitted(storedParticipant.submitted_at ?? null)
+    setSubmissionUrl(storedParticipant.submission_url ?? null)
     setPendingToken(null)
   }
 
@@ -188,6 +196,8 @@ export default function StudentSessionPage() {
     setEditorContent("")
     setDisplayName("")
     setQuestions([])
+    setSubmitted(null)
+    setSubmissionUrl(null)
   }
 
   const handleSend = async () => {
@@ -223,6 +233,45 @@ export default function StudentSessionPage() {
       toast.error(err instanceof Error ? err.message : "No se pudo cambiar de etapa")
     } finally {
       setChangingStage(false)
+    }
+  }
+
+  const handleSubmitWork = async () => {
+    if (!session) return
+    if (!authUser) {
+      toast.info("Para entregar necesitás iniciar sesión con tu cuenta institucional de Google")
+      router.push(`/auth?redirectTo=/session/${code}`)
+      return
+    }
+    if (!editorContent.trim()) {
+      toast.error("Escribí algo antes de entregar")
+      return
+    }
+    const confirmed = window.confirm(
+      "¿Entregar tu texto a Google Classroom? Se creará un documento con tu nombre y quedará entregado."
+    )
+    if (!confirmed) return
+    try {
+      setSubmitting(true)
+      const result = await submitSessionWork(session.id, token, editorContent.trim())
+      setSubmitted(result.submitted_at)
+      setSubmissionUrl(result.submission_url)
+      toast.success("¡Entregado! Tu texto ya está en Classroom.")
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "No se pudo entregar"
+      if (message.includes("google_auth_required")) {
+        toast.error("Necesitás autorizar tu cuenta de Google", {
+          action: {
+            label: "Autorizar",
+            onClick: () =>
+              (window.location.href = `/api/auth/google/classroom?redirectTo=${encodeURIComponent(`/session/${code}`)}`),
+          },
+        })
+      } else {
+        toast.error(message)
+      }
+    } finally {
+      setSubmitting(false)
     }
   }
 
@@ -453,6 +502,35 @@ export default function StudentSessionPage() {
                   <ChevronRight className="h-4 w-4" />
                 </Button>
               </div>
+            )}
+            {session.classroom_linked && (
+              submitted ? (
+                <Badge variant="secondary" className="mr-2 bg-green-100 text-green-800">
+                  <CheckCircle2 className="mr-1 h-3 w-3" />
+                  {submissionUrl ? (
+                    <a href={submissionUrl} target="_blank" rel="noopener noreferrer">
+                      Entregado
+                    </a>
+                  ) : (
+                    "Entregado"
+                  )}
+                </Badge>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="mr-2"
+                  onClick={handleSubmitWork}
+                  disabled={submitting}
+                >
+                  {submitting ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Upload className="mr-2 h-4 w-4" />
+                  )}
+                  Entregar
+                </Button>
+              )
             )}
             <Button
               size="sm"

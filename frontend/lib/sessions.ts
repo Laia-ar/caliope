@@ -35,6 +35,10 @@ export interface Session {
   stages?: SessionStage[]
   grade?: GradeInfo | null
   grade_id?: number | null
+  classroom_linked?: boolean
+  classroom_coursework_id?: string | null
+  classroom_coursework_url?: string | null
+  submissions?: SubmissionInfo[]
   created_at: string
   updated_at?: string
   teacher_name?: string
@@ -55,6 +59,15 @@ export interface ParticipantInfo {
   id: number
   display_name: string | null
   current_stage_id: number | null
+  submitted_at?: string | null
+  submission_url?: string | null
+}
+
+export interface SubmissionInfo {
+  participant_id: number
+  participant_name: string
+  submitted_at: string
+  submission_url: string | null
 }
 
 export interface CreateSessionData {
@@ -185,6 +198,20 @@ export async function setParticipantStage(
     },
     body: JSON.stringify({ stage_id: stageId }),
   })) as ParticipantInfo
+}
+
+export async function submitSessionWork(
+  sessionId: number,
+  token: string,
+  text: string
+): Promise<{ success: boolean; submitted_at: string; submission_url: string }> {
+  return (await apiCall(`/api/sessions/${sessionId}/submit`, {
+    method: "POST",
+    headers: {
+      "X-Participant-Token": token,
+    },
+    body: JSON.stringify({ text }),
+  })) as { success: boolean; submitted_at: string; submission_url: string }
 }
 
 export async function sendSessionQuery(
