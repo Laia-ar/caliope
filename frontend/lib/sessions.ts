@@ -65,7 +65,7 @@ export interface CreateSessionData {
   access_level?: SessionAccessLevel
   is_active?: boolean
   grade_id?: number | null
-  stages?: { instructions: string; custom_prompt_id?: number | null }[]
+  stages?: { id?: number; instructions: string; custom_prompt_id?: number | null }[]
 }
 
 async function apiCall(path: string, options: RequestInit = {}) {

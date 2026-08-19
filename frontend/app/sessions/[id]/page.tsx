@@ -6,7 +6,7 @@ import { AppLayout } from "@/components/app-layout"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { ArrowLeft, Loader2, RefreshCw, Users, Copy, Check, ExternalLink, Upload } from "lucide-react"
+import { ArrowLeft, Loader2, RefreshCw, Users, Copy, Check, ExternalLink, Upload, Pencil, Plus, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import {
   getSession,
@@ -15,6 +15,15 @@ import {
   type Session,
   type SessionQueryItem,
 } from "@/lib/sessions"
+import { loadPrompts, type Prompt } from "@/lib/prompts"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { Textarea } from "@/components/ui/textarea"
 import {
   fetchClassroomCourses,
   exportSessionToClassroomCoursework,
@@ -30,13 +39,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 
 function groupQueriesByParticipant(queries: SessionQueryItem[]): SessionQueryItem[][] {
   const map = new Map<number | null, SessionQueryItem[]>()
@@ -75,6 +77,11 @@ export default function SessionDetailPage() {
   const [exportDescription, setExportDescription] = useState<string>("")
   const [isExporting, setIsExporting] = useState(false)
   const [loadingCourses, setLoadingCourses] = useState(false)
+
+  const [editingStages, setEditingStages] = useState(false)
+  const [stageDrafts, setStageDrafts] = useState<{ id?: number; instructions: string; promptId: string }[]>([])
+  const [prompts, setPrompts] = useState<Prompt[]>([])
+  const [savingStages, setSavingStages] = useState(false)
 
   const loadSession = useCallback(async () => {
     if (!sessionId || isNaN(sessionId)) return
@@ -214,6 +221,48 @@ export default function SessionDetailPage() {
     }
   }
 
+  const startEditStages = async () => {
+    if (!session) return
+    setStageDrafts(
+      (session.stages ?? []).map((s) => ({
+        id: s.id,
+        instructions: s.instructions,
+        promptId: s.prompt ? String(s.prompt.id) : "",
+      }))
+    )
+    setEditingStages(true)
+    if (prompts.length === 0) {
+      try {
+        setPrompts(await loadPrompts())
+      } catch {
+        toast.error("No se pudieron cargar los prompts")
+      }
+    }
+  }
+
+  const handleSaveStages = async () => {
+    if (!session || stageDrafts.length === 0) return
+    try {
+      setSavingStages(true)
+      const updated = await updateSession(session.id, {
+        stages: stageDrafts.map((d) => ({
+          id: d.id,
+          instructions: d.instructions.trim(),
+          custom_prompt_id: d.promptId ? Number(d.promptId) : null,
+        })),
+      })
+      setSession((prev) =>
+        prev ? { ...prev, stages: updated.stages, instructions: updated.instructions } : prev
+      )
+      setEditingStages(false)
+      toast.success("Etapas actualizadas")
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "No se pudieron guardar las etapas")
+    } finally {
+      setSavingStages(false)
+    }
+  }
+
   if (loading) {
     return (
       <AppLayout>
@@ -338,24 +387,118 @@ export default function SessionDetailPage() {
 
                   {session.stages && session.stages.length > 0 ? (
                     <div>
-                      <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
-                        Etapas
-                      </p>
-                      <div className="mt-1 space-y-3">
-                        {session.stages.map((stage) => (
-                          <div key={stage.id} className="rounded-md border border-gray-100 p-2">
-                            <p className="text-xs font-medium text-gray-500">
-                              Etapa {stage.position}
-                              {stage.prompt ? ` · ${stage.prompt.name}` : ""}
-                            </p>
-                            {stage.instructions && (
-                              <p className="mt-1 whitespace-pre-wrap text-sm text-gray-700">
-                                {stage.instructions}
-                              </p>
-                            )}
-                          </div>
-                        ))}
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                          Etapas
+                        </p>
+                        {!editingStages && (
+                          <Button variant="ghost" size="sm" className="h-7 px-2" onClick={startEditStages}>
+                            <Pencil className="mr-1 h-3 w-3" />
+                            Editar
+                          </Button>
+                        )}
                       </div>
+                      {editingStages ? (
+                        <div className="mt-1 space-y-3">
+                          {stageDrafts.map((draft, index) => (
+                            <div key={index} className="space-y-2 rounded-md border border-gray-200 p-2">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-medium text-gray-500">
+                                  Etapa {index + 1}
+                                </span>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 w-7 p-0"
+                                  title="Quitar etapa"
+                                  disabled={stageDrafts.length === 1}
+                                  onClick={() =>
+                                    setStageDrafts((prev) =>
+                                      prev.length > 1 ? prev.filter((_, i) => i !== index) : prev
+                                    )
+                                  }
+                                >
+                                  <Trash2 className="h-3 w-3 text-gray-400" />
+                                </Button>
+                              </div>
+                              <Textarea
+                                rows={3}
+                                placeholder="Consigna de esta etapa..."
+                                value={draft.instructions}
+                                onChange={(e) =>
+                                  setStageDrafts((prev) =>
+                                    prev.map((d, i) =>
+                                      i === index ? { ...d, instructions: e.target.value } : d
+                                    )
+                                  )
+                                }
+                              />
+                              <Select
+                                value={draft.promptId}
+                                onValueChange={(value) =>
+                                  setStageDrafts((prev) =>
+                                    prev.map((d, i) => (i === index ? { ...d, promptId: value } : d))
+                                  )
+                                }
+                              >
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Seleccionar prompt" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {prompts.map((p) => (
+                                    <SelectItem key={p.id} value={String(p.id)}>
+                                      {p.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          ))}
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() =>
+                              setStageDrafts((prev) => [...prev, { instructions: "", promptId: "" }])
+                            }
+                          >
+                            <Plus className="mr-1 h-4 w-4" />
+                            Agregar etapa
+                          </Button>
+                          <div className="flex justify-end gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={savingStages}
+                              onClick={() => setEditingStages(false)}
+                            >
+                              Cancelar
+                            </Button>
+                            <Button size="sm" disabled={savingStages} onClick={handleSaveStages}>
+                              {savingStages ? (
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              ) : (
+                                "Guardar etapas"
+                              )}
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="mt-1 space-y-3">
+                          {session.stages.map((stage) => (
+                            <div key={stage.id} className="rounded-md border border-gray-100 p-2">
+                              <p className="text-xs font-medium text-gray-500">
+                                Etapa {stage.position}
+                                {stage.prompt ? ` · ${stage.prompt.name}` : ""}
+                              </p>
+                              {stage.instructions && (
+                                <p className="mt-1 whitespace-pre-wrap text-sm text-gray-700">
+                                  {stage.instructions}
+                                </p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <>
