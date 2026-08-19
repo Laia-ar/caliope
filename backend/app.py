@@ -1722,6 +1722,49 @@ def update_session(session_id):
             if not membership and not is_admin_user(current_user):
                 return jsonify({'error': 'No tenés permiso para asignar una tarea a este grado'}), 403
         s.grade_id = new_grade_id
+    if 'stages' in data:
+        stages_data = data['stages']
+        if not isinstance(stages_data, list) or not stages_data:
+            return jsonify({'error': 'Se necesita al menos una etapa'}), 400
+        cleaned = [{
+            'id': stage.get('id'),
+            'instructions': str(stage.get('instructions', '') or '').strip(),
+            'custom_prompt_id': stage.get('custom_prompt_id') or None,
+        } for stage in stages_data]
+        kept_ids = []
+        for index, stage in enumerate(cleaned, start=1):
+            existing = None
+            if stage['id']:
+                existing = SessionStage.query.filter_by(id=stage['id'], session_id=s.id).first()
+            if existing:
+                existing.position = index
+                existing.instructions = stage['instructions']
+                existing.custom_prompt_id = stage['custom_prompt_id']
+                kept_ids.append(existing.id)
+            else:
+                new_stage = SessionStage(
+                    session_id=s.id,
+                    position=index,
+                    instructions=stage['instructions'],
+                    custom_prompt_id=stage['custom_prompt_id'],
+                )
+                db.session.add(new_stage)
+                db.session.flush()
+                kept_ids.append(new_stage.id)
+        # Delete stages omitted from the payload
+        SessionStage.query.filter(
+            SessionStage.session_id == s.id,
+            ~SessionStage.id.in_(kept_ids)
+        ).delete(synchronize_session=False)
+        # Participants pointing at a deleted stage fall back to the first one
+        SessionParticipant.query.filter(
+            SessionParticipant.session_id == s.id,
+            SessionParticipant.current_stage_id.isnot(None),
+            ~SessionParticipant.current_stage_id.in_(kept_ids)
+        ).update({SessionParticipant.current_stage_id: None}, synchronize_session=False)
+        # Keep denormalized fields in sync with stage 1
+        s.instructions = cleaned[0]['instructions']
+        s.custom_prompt_id = cleaned[0]['custom_prompt_id']
     db.session.commit()
     return jsonify({
         'id': s.id,
@@ -1731,6 +1774,7 @@ def update_session(session_id):
         'is_active': s.is_active,
         'llm_model_name': s.llm_model_name,
         'grade_id': s.grade_id,
+        'stages': _serialize_session_stages(s),
         'updated_at': s.updated_at.isoformat()
     })
 
