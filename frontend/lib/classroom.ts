@@ -34,6 +34,11 @@ async function classroomFetch(path: string, options: RequestInit = {}): Promise<
   })
   const data = await response.json().catch(() => ({}))
   if (!response.ok) {
+    // Keep the machine-readable code in the message so callers can detect
+    // google_auth_required and offer re-authorization.
+    if (data.error === "google_auth_required") {
+      throw new Error(`google_auth_required: ${data.message || ""}`)
+    }
     throw new Error(data.message || data.error || `HTTP ${response.status}`)
   }
   return data
@@ -73,4 +78,23 @@ export async function exportSessionToClassroomMaterials(
     method: "POST",
     body: JSON.stringify({ course_id: courseId, title, description }),
   })) as ExportResult
+}
+
+export interface LinkClassroomResult {
+  success: boolean
+  classroom_course_id: string
+  classroom_coursework_id: string
+  classroom_coursework_url: string | null
+}
+
+export async function linkSessionToClassroom(
+  sessionId: number,
+  courseId: string,
+  title: string,
+  description: string
+): Promise<LinkClassroomResult> {
+  return (await classroomFetch(`/api/sessions/${sessionId}/link-classroom`, {
+    method: "POST",
+    body: JSON.stringify({ course_id: courseId, title, description }),
+  })) as LinkClassroomResult
 }

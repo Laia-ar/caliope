@@ -28,6 +28,7 @@ import {
   fetchClassroomCourses,
   exportSessionToClassroomCoursework,
   exportSessionToClassroomMaterials,
+  linkSessionToClassroom,
   type ClassroomCourse,
 } from "@/lib/classroom"
 import { renderHtmlContent } from "@/lib/html"
@@ -82,6 +83,11 @@ export default function SessionDetailPage() {
   const [stageDrafts, setStageDrafts] = useState<{ id?: number; instructions: string; promptId: string }[]>([])
   const [prompts, setPrompts] = useState<Prompt[]>([])
   const [savingStages, setSavingStages] = useState(false)
+
+  const [isLinkModalOpen, setIsLinkModalOpen] = useState(false)
+  const [linkTitle, setLinkTitle] = useState("")
+  const [linkDescription, setLinkDescription] = useState("")
+  const [linking, setLinking] = useState(false)
 
   const loadSession = useCallback(async () => {
     if (!sessionId || isNaN(sessionId)) return
@@ -263,6 +269,61 @@ export default function SessionDetailPage() {
     }
   }
 
+  const handleOpenLink = async () => {
+    if (!session) return
+    setLinkTitle(session.title)
+    setLinkDescription(session.instructions ? `Consigna: ${session.instructions}` : "")
+    setIsLinkModalOpen(true)
+    if (courses.length === 0) {
+      setLoadingCourses(true)
+      try {
+        const data = await fetchClassroomCourses()
+        setCourses(data)
+        if (data.length > 0) {
+          setSelectedCourse(data[0].id)
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "No se pudieron cargar los cursos"
+        if (message.includes("google_auth_required")) {
+          toast.error("Se requiere autorización de Google Classroom", {
+            action: {
+              label: "Autorizar",
+              onClick: () =>
+                window.location.href = `/api/auth/google/classroom?redirectTo=${encodeURIComponent(window.location.pathname)}`,
+            },
+          })
+        } else {
+          toast.error(message)
+        }
+      } finally {
+        setLoadingCourses(false)
+      }
+    }
+  }
+
+  const handleLinkClassroom = async () => {
+    if (!selectedCourse || !session) return
+    try {
+      setLinking(true)
+      const result = await linkSessionToClassroom(session.id, selectedCourse, linkTitle, linkDescription)
+      setSession((prev) =>
+        prev
+          ? {
+              ...prev,
+              classroom_coursework_id: result.classroom_coursework_id,
+              classroom_coursework_url: result.classroom_coursework_url,
+            }
+          : prev
+      )
+      setIsLinkModalOpen(false)
+      toast.success("Tarea vinculada a Classroom. Los alumnos ya pueden entregar desde Calíope.")
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "No se pudo vincular con Classroom")
+    } finally {
+      setLinking(false)
+    }
+  }
+
   if (loading) {
     return (
       <AppLayout>
@@ -384,6 +445,65 @@ export default function SessionDetailPage() {
                       )}
                     </Button>
                   </div>
+
+                  <div>
+                    <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                      Google Classroom
+                    </p>
+                    {session.classroom_coursework_id ? (
+                      <div className="mt-1 space-y-2">
+                        {session.classroom_coursework_url && (
+                          <a
+                            href={session.classroom_coursework_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1 text-sm text-blue-600 hover:underline"
+                          >
+                            <ExternalLink className="h-3 w-3" />
+                            Ver actividad en Classroom
+                          </a>
+                        )}
+                        <p className="text-xs text-gray-500">
+                          Los alumnos con cuenta de Google pueden entregar su texto desde Calíope.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="mt-1">
+                        <Button variant="outline" size="sm" onClick={handleOpenLink}>
+                          <Upload className="mr-2 h-4 w-4" />
+                          Vincular con Classroom
+                        </Button>
+                        <p className="mt-1 text-xs text-gray-500">
+                          Crea una actividad en Classroom para que cada alumno entregue su texto desde Calíope.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  {session.submissions && session.submissions.length > 0 && (
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                        Entregas ({session.submissions.length})
+                      </p>
+                      <div className="mt-1 space-y-1">
+                        {session.submissions.map((sub) => (
+                          <div key={sub.participant_id} className="flex items-center justify-between text-sm">
+                            <span className="text-gray-700">{sub.participant_name}</span>
+                            {sub.submission_url && (
+                              <a
+                                href={sub.submission_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-xs text-blue-600 hover:underline"
+                              >
+                                Ver documento
+                              </a>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {session.stages && session.stages.length > 0 ? (
                     <div>
@@ -713,6 +833,70 @@ export default function SessionDetailPage() {
                 <Upload className="mr-2 h-4 w-4" />
               )}
               Crear actividad
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isLinkModalOpen} onOpenChange={setIsLinkModalOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Vincular con Google Classroom</DialogTitle>
+            <DialogDescription>
+              Se creará una actividad en el curso seleccionado. Cada alumno con cuenta de Google podrá entregar su texto desde Calíope y quedará asociado a su entrega en Classroom.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-700">Curso</label>
+              <Select value={selectedCourse} onValueChange={setSelectedCourse} disabled={loadingCourses}>
+                <SelectTrigger>
+                  <SelectValue placeholder={loadingCourses ? "Cargando cursos..." : "Seleccioná un curso"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {courses.map((course) => (
+                    <SelectItem key={course.id} value={course.id}>
+                      {course.name} {course.section ? `(${course.section})` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-700">Título</label>
+              <input
+                type="text"
+                value={linkTitle}
+                onChange={(e) => setLinkTitle(e.target.value)}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                placeholder="Título de la actividad"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-700">Descripción</label>
+              <textarea
+                value={linkDescription}
+                onChange={(e) => setLinkDescription(e.target.value)}
+                rows={3}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                placeholder="Descripción para los alumnos"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsLinkModalOpen(false)} disabled={linking}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleLinkClassroom}
+              disabled={linking || !selectedCourse || !linkTitle.trim()}
+            >
+              {linking ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Upload className="mr-2 h-4 w-4" />
+              )}
+              Vincular
             </Button>
           </DialogFooter>
         </DialogContent>
