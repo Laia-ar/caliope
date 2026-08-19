@@ -38,7 +38,7 @@ export default function SessionsPage() {
         const data = await listSessions()
         setCreatedSessions(data)
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "No se pudieron cargar las sesiones creadas")
+        toast.error(err instanceof Error ? err.message : "No se pudieron cargar las tareas creadas")
       } finally {
         setLoadingCreated(false)
       }
@@ -50,7 +50,7 @@ export default function SessionsPage() {
         const data = await fetchParticipatedSessions()
         setParticipatedSessions(data)
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "No se pudieron cargar las sesiones en las que participás")
+        toast.error(err instanceof Error ? err.message : "No se pudieron cargar las tareas en las que participás")
       } finally {
         setLoadingParticipated(false)
       }
@@ -76,13 +76,13 @@ export default function SessionsPage() {
   }, [])
 
   const handleDelete = async (id: number) => {
-    if (!confirm("¿Estás seguro de que querés eliminar esta sesión?")) return
+    if (!confirm("¿Estás seguro de que querés eliminar esta tarea?")) return
     try {
       await deleteSession(id)
-      toast.success("Sesión eliminada")
+      toast.success("Tarea eliminada")
       setCreatedSessions((prev) => prev.filter((s) => s.id !== id))
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "No se pudo eliminar la sesión")
+      toast.error(err instanceof Error ? err.message : "No se pudo eliminar la tarea")
     }
   }
 
@@ -155,29 +155,29 @@ export default function SessionsPage() {
         <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
           <div className="mb-8 flex items-center justify-between">
             <div>
-              <h1 className="text-2xl font-semibold text-gray-900">Mis sesiones</h1>
+              <h1 className="text-2xl font-semibold text-gray-900">Mis tareas</h1>
               <p className="mt-1 text-sm text-gray-500">
-                Gestiona las sesiones que creaste o accedé a las que participás.
+                Gestiona las tareas que creaste o accedé a las que participás.
               </p>
             </div>
             {isTeacher && (
               <Button onClick={() => router.push("/sessions/new")}>
                 <Plus className="mr-2 h-4 w-4" />
-                Nueva sesión
+                Nueva tarea
               </Button>
             )}
           </div>
 
           {isLoading ? (
-            <p className="text-sm text-gray-500">Cargando sesiones...</p>
+            <p className="text-sm text-gray-500">Cargando tareas...</p>
           ) : (
             <div className="space-y-10">
               {/* Grade sessions */}
               <section>
-                <h2 className="mb-4 text-lg font-medium text-gray-900">Sesiones de mis cursos</h2>
+                <h2 className="mb-4 text-lg font-medium text-gray-900">Tareas de mis cursos</h2>
                 {gradeSessions.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-gray-300 bg-white p-8 text-center">
-                    <p className="text-gray-600">No tenés sesiones asignadas a tus cursos todavía.</p>
+                    <p className="text-gray-600">No tenés tareas asignadas a tus cursos todavía.</p>
                   </div>
                 ) : (
                   <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -192,7 +192,7 @@ export default function SessionsPage() {
                   <h2 className="mb-4 text-lg font-medium text-gray-900">Creadas por mí</h2>
                   {createdSessions.length === 0 ? (
                     <div className="rounded-xl border border-dashed border-gray-300 bg-white p-8 text-center">
-                      <p className="text-gray-600">No tenés sesiones creadas todavía.</p>
+                      <p className="text-gray-600">No tenés tareas creadas todavía.</p>
                     </div>
                   ) : (
                     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -207,7 +207,7 @@ export default function SessionsPage() {
                 <h2 className="mb-4 text-lg font-medium text-gray-900">En las que participé</h2>
                 {participatedSessions.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-gray-300 bg-white p-8 text-center">
-                    <p className="text-gray-600">Todavía no participaste de ninguna sesión.</p>
+                    <p className="text-gray-600">Todavía no participaste de ninguna tarea.</p>
                   </div>
                 ) : (
                   <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

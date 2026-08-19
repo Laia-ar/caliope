@@ -137,6 +137,19 @@ class ClassroomSession(db.Model):
     prompt = db.relationship('CustomPrompt', lazy=True)
     participants = db.relationship('SessionParticipant', backref='session', lazy=True, cascade='all, delete-orphan')
     queries = db.relationship('SessionQuery', backref='session', lazy=True, cascade='all, delete-orphan')
+    stages = db.relationship('SessionStage', backref='session', lazy=True, cascade='all, delete-orphan',
+                             order_by='SessionStage.position')
+
+class SessionStage(db.Model):
+    __tablename__ = 'session_stages'
+
+    id = db.Column(db.Integer, primary_key=True)
+    session_id = db.Column(db.Integer, db.ForeignKey('classroom_sessions.id'), nullable=False)
+    position = db.Column(db.Integer, nullable=False, default=1)
+    instructions = db.Column(db.Text, nullable=False, default='')
+    custom_prompt_id = db.Column(db.Integer, db.ForeignKey('custom_prompts.id'), nullable=True)
+
+    prompt = db.relationship('CustomPrompt', lazy=True)
 
 class SessionParticipant(db.Model):
     __tablename__ = 'session_participants'
@@ -146,9 +159,11 @@ class SessionParticipant(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     display_name = db.Column(db.String(100), nullable=True)
     token = db.Column(db.String(36), unique=True, nullable=False)
+    current_stage_id = db.Column(db.Integer, db.ForeignKey('session_stages.id'), nullable=True)
     joined_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     user = db.relationship('User', lazy=True)
+    current_stage = db.relationship('SessionStage', lazy=True)
     queries = db.relationship('SessionQuery', backref='participant', lazy=True)
 
 class SessionQuery(db.Model):
@@ -157,9 +172,12 @@ class SessionQuery(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     session_id = db.Column(db.Integer, db.ForeignKey('classroom_sessions.id'), nullable=False)
     participant_id = db.Column(db.Integer, db.ForeignKey('session_participants.id'), nullable=True)
+    stage_id = db.Column(db.Integer, db.ForeignKey('session_stages.id'), nullable=True)
     query_text = db.Column(db.Text, nullable=False)
     response_text = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    stage = db.relationship('SessionStage', lazy=True)
 
 class UsageLog(db.Model):
     __tablename__ = 'usage_logs'

@@ -86,9 +86,9 @@ export function Sidebar({ isCollapsed = false, onToggle }: SidebarProps) {
   if (isAuthenticated) {
     navItems.push({
       href: "/sessions",
-      label: "Sesiones",
+      label: "Tareas",
       icon: "/icons/help-icon.svg",
-      iconAlt: "Mis sesiones",
+      iconAlt: "Mis tareas",
     })
   }
   if (canCreateInvites || isTeacher || isAdminUser) {

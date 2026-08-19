@@ -83,7 +83,7 @@ export default function SessionDetailPage() {
       const s = await getSession(sessionId)
       setSession(s)
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "No se pudo cargar la sesión")
+      toast.error(err instanceof Error ? err.message : "No se pudo cargar la tarea")
     } finally {
       setLoading(false)
     }
@@ -206,7 +206,7 @@ export default function SessionDetailPage() {
         is_active: !session.is_active,
       })
       setSession((prev) => (prev ? { ...prev, is_active: updated.is_active } : prev))
-      toast.success(updated.is_active ? "Sesión activada" : "Sesión desactivada")
+      toast.success(updated.is_active ? "Tarea activada" : "Tarea desactivada")
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "No se pudo actualizar")
     } finally {
@@ -228,7 +228,7 @@ export default function SessionDetailPage() {
     return (
       <AppLayout>
         <div className="flex h-full flex-col items-center justify-center gap-4">
-          <p className="text-gray-600">No se encontró la sesión.</p>
+          <p className="text-gray-600">No se encontró la tarea.</p>
           <Button variant="outline" onClick={() => router.push("/sessions")}>
             Volver
           </Button>
@@ -300,7 +300,7 @@ export default function SessionDetailPage() {
                         size="sm"
                         className="h-8 w-8 p-0"
                         asChild
-                        title="Abrir sesión"
+                        title="Abrir tarea"
                       >
                         <a href={publicJoinUrl} target="_blank" rel="noopener noreferrer">
                           <ExternalLink className="h-4 w-4" />
@@ -336,26 +336,51 @@ export default function SessionDetailPage() {
                     </Button>
                   </div>
 
-                  {session.instructions && (
+                  {session.stages && session.stages.length > 0 ? (
                     <div>
                       <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
-                        Consigna
+                        Etapas
                       </p>
-                      <p className="mt-1 whitespace-pre-wrap text-sm text-gray-700">
-                        {session.instructions}
-                      </p>
+                      <div className="mt-1 space-y-3">
+                        {session.stages.map((stage) => (
+                          <div key={stage.id} className="rounded-md border border-gray-100 p-2">
+                            <p className="text-xs font-medium text-gray-500">
+                              Etapa {stage.position}
+                              {stage.prompt ? ` · ${stage.prompt.name}` : ""}
+                            </p>
+                            {stage.instructions && (
+                              <p className="mt-1 whitespace-pre-wrap text-sm text-gray-700">
+                                {stage.instructions}
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  )}
+                  ) : (
+                    <>
+                      {session.instructions && (
+                        <div>
+                          <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                            Consigna
+                          </p>
+                          <p className="mt-1 whitespace-pre-wrap text-sm text-gray-700">
+                            {session.instructions}
+                          </p>
+                        </div>
+                      )}
 
-                  {session.prompt && (
-                    <div>
-                      <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
-                        Prompt
-                      </p>
-                      <p className="mt-1 text-sm font-medium text-gray-700">
-                        {session.prompt.name}
-                      </p>
-                    </div>
+                      {session.prompt && (
+                        <div>
+                          <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                            Prompt
+                          </p>
+                          <p className="mt-1 text-sm font-medium text-gray-700">
+                            {session.prompt.name}
+                          </p>
+                        </div>
+                      )}
+                    </>
                   )}
 
                   <div>
@@ -414,6 +439,11 @@ export default function SessionDetailPage() {
                             <div className="flex items-center justify-between">
                               <span className="text-xs font-medium text-gray-500">
                                 {latest.participant_name || "Anónimo"}
+                                {latest.stage_position != null && (
+                                  <Badge variant="outline" className="ml-2 text-xs">
+                                    Etapa {latest.stage_position}
+                                  </Badge>
+                                )}
                               </span>
                               <span className="text-xs text-gray-400">
                                 {new Date(latest.created_at).toLocaleTimeString()}
@@ -438,6 +468,11 @@ export default function SessionDetailPage() {
                                     <div key={q.id} className="text-sm">
                                       <div className="text-xs text-gray-400">
                                         {new Date(q.created_at).toLocaleTimeString()}
+                                        {q.stage_position != null && (
+                                          <Badge variant="outline" className="ml-2 text-xs">
+                                            Etapa {q.stage_position}
+                                          </Badge>
+                                        )}
                                       </div>
                                       <div
                                         className="mt-1 font-medium text-gray-900 prose prose-sm max-w-none"

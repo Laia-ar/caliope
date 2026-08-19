@@ -17,7 +17,7 @@ from sqlalchemy import event
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from extensions import db
-from models import init_db, User, Document, CustomPrompt, InvitationLink, ClassroomSession, SessionParticipant, SessionQuery, AvailableModel, UsageLog, OpenRouterBalanceSnapshot, Institution, Grade, UserGrade
+from models import init_db, User, Document, CustomPrompt, InvitationLink, ClassroomSession, SessionParticipant, SessionQuery, SessionStage, AvailableModel, UsageLog, OpenRouterBalanceSnapshot, Institution, Grade, UserGrade
 from openrouter_usage import create_usage_log, sync_missing_costs, fetch_openrouter_credits
 from google_classroom import (
     get_credentials_for_user,
@@ -1517,6 +1517,22 @@ def _generate_access_code(length=6):
         if not ClassroomSession.query.filter_by(access_code=code).first():
             return code
 
+def _serialize_session_stages(s):
+    """Serialize the ordered stages of a session, including each stage's prompt."""
+    stages = SessionStage.query.filter_by(session_id=s.id).order_by(SessionStage.position).all()
+    result = []
+    for stage in stages:
+        prompt = None
+        if stage.prompt:
+            prompt = {'id': stage.prompt.id, 'name': stage.prompt.name, 'content': stage.prompt.content}
+        result.append({
+            'id': stage.id,
+            'position': stage.position,
+            'instructions': stage.instructions,
+            'prompt': prompt,
+        })
+    return result
+
 @app.route('/api/sessions', methods=['POST'])
 @login_required
 def create_session():
@@ -1528,14 +1544,28 @@ def create_session():
     instructions = data.get('instructions', '').strip()
     prompt_id = data.get('custom_prompt_id')
     model_name = data.get('llm_model_name')
-    access_level = data.get('access_level', 'registered').strip().lower()
+    access_level = data.get('access_level', 'guests').strip().lower()
     grade_id = data.get('grade_id')
+    stages_data = data.get('stages')
     if access_level not in ('guests', 'registered', 'both'):
         return jsonify({'error': 'Invalid access level'}), 400
     if not title:
         return jsonify({'error': 'Title is required'}), 400
     if not model_name:
         return jsonify({'error': 'Model is required'}), 400
+    if stages_data is not None:
+        if not isinstance(stages_data, list) or not stages_data:
+            return jsonify({'error': 'Se necesita al menos una etapa'}), 400
+        stages_data = [
+            {
+                'instructions': str(stage.get('instructions', '') or '').strip(),
+                'custom_prompt_id': stage.get('custom_prompt_id') or None,
+            }
+            for stage in stages_data
+        ]
+    else:
+        # Clientes viejos: una sola etapa desde los campos planos
+        stages_data = [{'instructions': instructions, 'custom_prompt_id': prompt_id or None}]
     if grade_id:
         grade_id = int(grade_id)
         # Verify teacher belongs to the grade
@@ -1545,20 +1575,29 @@ def create_session():
             role='teacher',
         ).first()
         if not membership and not is_admin_user(current_user):
-            return jsonify({'error': 'No tenés permiso para asignar una sesión a este grado'}), 403
+            return jsonify({'error': 'No tenés permiso para asignar una tarea a este grado'}), 403
     code = _generate_access_code()
+    first_stage = stages_data[0]
     session_obj = ClassroomSession(
         teacher_id=current_user.id,
         grade_id=grade_id,
         title=title,
-        instructions=instructions,
-        custom_prompt_id=prompt_id if prompt_id else None,
+        instructions=first_stage['instructions'],
+        custom_prompt_id=first_stage['custom_prompt_id'],
         llm_model_name=model_name,
         access_code=code,
         access_level=access_level,
         is_active=True
     )
     db.session.add(session_obj)
+    db.session.flush()
+    for index, stage in enumerate(stages_data, start=1):
+        db.session.add(SessionStage(
+            session_id=session_obj.id,
+            position=index,
+            instructions=stage['instructions'],
+            custom_prompt_id=stage['custom_prompt_id'],
+        ))
     db.session.commit()
     return jsonify({
         'id': session_obj.id,
@@ -1623,6 +1662,7 @@ def get_session(session_id):
         'llm_model_name': s.llm_model_name,
         'grade': grade,
         'prompt': prompt,
+        'stages': _serialize_session_stages(s),
         'created_at': s.created_at.isoformat(),
         'updated_at': s.updated_at.isoformat()
     })
@@ -1659,7 +1699,8 @@ def update_session(session_id):
     s = ClassroomSession.query.filter_by(id=session_id, teacher_id=current_user.id).first_or_404()
     data = request.get_json()
     s.title = data.get('title', s.title)
-    s.instructions = data.get('instructions', s.instructions)
+    if 'instructions' in data:
+        s.instructions = str(data.get('instructions') or '').strip()
     s.custom_prompt_id = data.get('custom_prompt_id', s.custom_prompt_id)
     s.llm_model_name = data.get('llm_model_name', s.llm_model_name)
     if 'access_level' in data:
@@ -1679,7 +1720,7 @@ def update_session(session_id):
                 role='teacher',
             ).first()
             if not membership and not is_admin_user(current_user):
-                return jsonify({'error': 'No tenés permiso para asignar una sesión a este grado'}), 403
+                return jsonify({'error': 'No tenés permiso para asignar una tarea a este grado'}), 403
         s.grade_id = new_grade_id
     db.session.commit()
     return jsonify({
@@ -1728,6 +1769,8 @@ def get_session_queries(session_id):
             'query_text': q.query_text,
             'response_text': q.response_text,
             'participant_name': participant_name,
+            'stage_id': q.stage_id,
+            'stage_position': q.stage.position if q.stage else None,
             'created_at': q.created_at.isoformat()
         })
     return jsonify({'queries': result})
@@ -1746,18 +1789,27 @@ def join_session():
     is_registered_user = current_user.is_authenticated
 
     if s.access_level == 'registered' and not is_registered_user:
-        return jsonify({'error': 'Esta sesión requiere iniciar sesión'}), 401
+        return jsonify({'error': 'Esta tarea requiere iniciar sesión'}), 401
 
     token = str(uuid.uuid4())
     participant = SessionParticipant(
         session_id=s.id,
         token=token
     )
-    if is_registered_user:
+    # En sesiones para invitados la identidad es siempre el nombre ingresado,
+    # aunque el navegador tenga una sesión de login activa.
+    treat_as_guest = s.access_level == 'guests' or not is_registered_user
+    if treat_as_guest:
+        if not display_name:
+            guest_count = SessionParticipant.query.filter_by(session_id=s.id).count()
+            display_name = f'Invitado {guest_count + 1}'
+        participant.display_name = display_name
+    else:
         participant.user_id = current_user.id
         participant.display_name = current_user.name
-    else:
-        participant.display_name = display_name
+    first_stage = SessionStage.query.filter_by(session_id=s.id).order_by(SessionStage.position).first()
+    if first_stage:
+        participant.current_stage_id = first_stage.id
     db.session.add(participant)
     db.session.commit()
     prompt = None
@@ -1772,10 +1824,45 @@ def join_session():
             'instructions': s.instructions,
             'access_level': s.access_level,
             'llm_model_name': s.llm_model_name,
-            'prompt': prompt
+            'prompt': prompt,
+            'stages': _serialize_session_stages(s)
         },
-        'participant_token': token
+        'participant_token': token,
+        'participant': {
+            'id': participant.id,
+            'display_name': participant.display_name,
+            'current_stage_id': participant.current_stage_id
+        }
     })
+
+@app.route('/api/sessions/<int:session_id>/participant/me', methods=['GET'])
+def get_participant_me(session_id):
+    token = request.headers.get('X-Participant-Token', '')
+    participant = SessionParticipant.query.filter_by(token=token, session_id=session_id).first() if token else None
+    if not participant:
+        return jsonify({'error': 'Invalid participant token'}), 401
+    display_name = participant.display_name
+    if not display_name and participant.user:
+        display_name = participant.user.name
+    return jsonify({
+        'id': participant.id,
+        'display_name': display_name,
+        'current_stage_id': participant.current_stage_id
+    })
+
+@app.route('/api/sessions/<int:session_id>/participant/stage', methods=['POST'])
+def set_participant_stage(session_id):
+    token = request.headers.get('X-Participant-Token', '')
+    participant = SessionParticipant.query.filter_by(token=token, session_id=session_id).first() if token else None
+    if not participant:
+        return jsonify({'error': 'Invalid participant token'}), 401
+    data = request.get_json() or {}
+    stage = SessionStage.query.filter_by(id=data.get('stage_id'), session_id=session_id).first()
+    if not stage:
+        return jsonify({'error': 'Invalid stage'}), 400
+    participant.current_stage_id = stage.id
+    db.session.commit()
+    return jsonify({'id': participant.id, 'current_stage_id': participant.current_stage_id})
 
 @app.route('/api/sessions/by-code/<code>', methods=['GET'])
 def get_session_by_code(code):
@@ -1793,7 +1880,8 @@ def get_session_by_code(code):
         'instructions': s.instructions,
         'access_level': s.access_level,
         'llm_model_name': s.llm_model_name,
-        'prompt': prompt
+        'prompt': prompt,
+        'stages': _serialize_session_stages(s)
     })
 
 @app.route('/api/sessions/<int:session_id>/query', methods=['POST'])
@@ -1811,8 +1899,15 @@ def session_query(session_id):
     s = ClassroomSession.query.get(session_id)
     if not s or not s.is_active:
         return jsonify({'error': 'Session not found or inactive'}), 404
+    stage = None
+    if participant.current_stage_id:
+        stage = SessionStage.query.filter_by(id=participant.current_stage_id, session_id=s.id).first()
+    if not stage:
+        stage = SessionStage.query.filter_by(session_id=s.id).order_by(SessionStage.position).first()
     customprompt = None
-    if s.custom_prompt_id:
+    if stage and stage.custom_prompt_id:
+        customprompt = CustomPrompt.query.get(stage.custom_prompt_id)
+    elif s.custom_prompt_id:
         customprompt = CustomPrompt.query.get(s.custom_prompt_id)
     customprompt_content = customprompt.content if customprompt else "No custom prompt selected"
     openrouter_api_key = os.getenv('OPENROUTER_API_KEY')
@@ -1840,6 +1935,7 @@ def session_query(session_id):
         query_record = SessionQuery(
             session_id=s.id,
             participant_id=participant.id,
+            stage_id=stage.id if stage else None,
             query_text=text,
             response_text=message
         )
@@ -1967,7 +2063,7 @@ def export_session_to_classroom_coursework(session_id):
     data = request.get_json()
     course_id = data.get('course_id')
     title = (data.get('title') or session_obj.title or 'Textos de alumnos').strip()
-    description = (data.get('description') or f"Documentos generados desde la sesión {session_obj.title}.").strip()
+    description = (data.get('description') or f"Documentos generados desde la tarea {session_obj.title}.").strip()
     if not course_id:
         return jsonify({'error': 'course_id is required'}), 400
 
@@ -2016,7 +2112,7 @@ def export_session_to_classroom_materials(session_id):
     data = request.get_json()
     course_id = data.get('course_id')
     title = (data.get('title') or session_obj.title or 'Textos de alumnos').strip()
-    description = (data.get('description') or f"Documentos generados desde la sesión {session_obj.title}.").strip()
+    description = (data.get('description') or f"Documentos generados desde la tarea {session_obj.title}.").strip()
     if not course_id:
         return jsonify({'error': 'course_id is required'}), 400
 

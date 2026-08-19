@@ -9,3 +9,4 @@ next-env.d.ts
 users.json
 usuarios.json
 usuarios.txt
+.venv/
