@@ -8,6 +8,17 @@ export interface GradeInfo {
   institution_id: number
 }
 
+export interface SessionStage {
+  id: number
+  position: number
+  instructions: string
+  prompt?: {
+    id: number
+    name: string
+    content: string
+  } | null
+}
+
 export interface Session {
   id: number
   title: string
@@ -21,6 +32,7 @@ export interface Session {
     name: string
     content: string
   } | null
+  stages?: SessionStage[]
   grade?: GradeInfo | null
   grade_id?: number | null
   created_at: string
@@ -34,7 +46,15 @@ export interface SessionQueryItem {
   query_text: string
   response_text: string
   participant_name: string | null
+  stage_id: number | null
+  stage_position: number | null
   created_at: string
+}
+
+export interface ParticipantInfo {
+  id: number
+  display_name: string | null
+  current_stage_id: number | null
 }
 
 export interface CreateSessionData {
@@ -45,6 +65,7 @@ export interface CreateSessionData {
   access_level?: SessionAccessLevel
   is_active?: boolean
   grade_id?: number | null
+  stages?: { instructions: string; custom_prompt_id?: number | null }[]
 }
 
 async function apiCall(path: string, options: RequestInit = {}) {
@@ -133,15 +154,37 @@ export async function getSessionQueries(id: number): Promise<SessionQueryItem[]>
   return Array.isArray(data.queries) ? (data.queries as SessionQueryItem[]) : []
 }
 
-export async function joinSession(code: string, displayName?: string): Promise<{ session: Session; participant_token: string }> {
+export async function joinSession(code: string, displayName?: string): Promise<{ session: Session; participant_token: string; participant: ParticipantInfo }> {
   return (await apiCall("/api/sessions/join", {
     method: "POST",
     body: JSON.stringify({ access_code: code, display_name: displayName }),
-  })) as { session: Session; participant_token: string }
+  })) as { session: Session; participant_token: string; participant: ParticipantInfo }
 }
 
 export async function getSessionByCode(code: string): Promise<Session> {
   return (await apiCall(`/api/sessions/by-code/${code}`)) as Session
+}
+
+export async function getParticipantMe(sessionId: number, token: string): Promise<ParticipantInfo> {
+  return (await apiCall(`/api/sessions/${sessionId}/participant/me`, {
+    headers: {
+      "X-Participant-Token": token,
+    },
+  })) as ParticipantInfo
+}
+
+export async function setParticipantStage(
+  sessionId: number,
+  token: string,
+  stageId: number
+): Promise<ParticipantInfo> {
+  return (await apiCall(`/api/sessions/${sessionId}/participant/stage`, {
+    method: "POST",
+    headers: {
+      "X-Participant-Token": token,
+    },
+    body: JSON.stringify({ stage_id: stageId }),
+  })) as ParticipantInfo
 }
 
 export async function sendSessionQuery(

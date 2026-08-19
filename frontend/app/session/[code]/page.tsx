@@ -5,21 +5,22 @@ import { useParams, useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { TipTapEditor } from "@/components/tiptap-editor"
+import { QuestionCard } from "@/components/question-card"
 import { toast } from "sonner"
-import { Send, Loader2, Sparkles, BookOpen, LogIn } from "lucide-react"
+import { Send, Loader2, BookOpen, LogIn, ChevronLeft, ChevronRight } from "lucide-react"
 import {
   getSessionByCode,
   joinSession,
   sendSessionQuery,
+  getParticipantMe,
+  setParticipantStage,
   type Session,
+  type ParticipantInfo,
 } from "@/lib/sessions"
-import { renderHtmlContent } from "@/lib/html"
 
-interface ChatMessage {
-  id: number
-  query_text: string
-  response_text: string
-  created_at: string
+interface Question {
+  id: string
+  text: string
 }
 
 interface AuthUser {
@@ -43,23 +44,33 @@ export default function StudentSessionPage() {
 
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
   const [token, setToken] = useState<string>("")
+  const [participant, setParticipant] = useState<ParticipantInfo | null>(null)
+  const [pendingToken, setPendingToken] = useState<string | null>(null)
+  const [storedParticipant, setStoredParticipant] = useState<ParticipantInfo | null>(null)
+  const [checkingStored, setCheckingStored] = useState(false)
   const [displayName, setDisplayName] = useState("")
   const [joining, setJoining] = useState(false)
   const [editorContent, setEditorContent] = useState("")
   const [draftContent, setDraftContent] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
-  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [questions, setQuestions] = useState<Question[]>([])
   const [authUser, setAuthUser] = useState<AuthUser | null>(null)
+  const [currentStageId, setCurrentStageId] = useState<number | null>(null)
+  const [changingStage, setChangingStage] = useState(false)
 
   const loadSession = useCallback(async () => {
     try {
       setLoading(true)
+      setLoadError(null)
       const s = await getSessionByCode(code)
       setSession(s)
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "No se pudo cargar la sesión")
+      const message = err instanceof Error ? err.message : "No se pudo cargar la tarea"
+      setLoadError(message)
+      toast.error(message)
     } finally {
       setLoading(false)
     }
@@ -95,12 +106,35 @@ export default function StudentSessionPage() {
     if (typeof window !== "undefined") {
       const storedToken = localStorage.getItem(getTokenKey(code))
       if (storedToken) {
-        setToken(storedToken)
+        setPendingToken(storedToken)
       }
       const savedDraft = localStorage.getItem(getDraftKey(code))
       setDraftContent(savedDraft || "")
     }
   }, [loadSession, loadAuth, code])
+
+  // Validate a stored participant token against the backend before resuming
+  useEffect(() => {
+    if (!session || !pendingToken) return
+    let cancelled = false
+    setCheckingStored(true)
+    getParticipantMe(session.id, pendingToken)
+      .then((p) => {
+        if (!cancelled) setStoredParticipant(p)
+      })
+      .catch(() => {
+        if (!cancelled) {
+          localStorage.removeItem(getTokenKey(code))
+          setPendingToken(null)
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setCheckingStored(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [session, pendingToken, code])
 
   // Auto-save draft with debounce
   useEffect(() => {
@@ -116,18 +150,44 @@ export default function StudentSessionPage() {
     if (!session) return
     try {
       setJoining(true)
-      const result = await joinSession(
-        code,
-        authUser ? undefined : displayName || undefined
-      )
+      // En tareas para invitados siempre se usa el nombre ingresado, aunque
+      // haya un usuario logueado en el navegador.
+      const nameToSend =
+        session.access_level === "guests"
+          ? displayName || undefined
+          : authUser
+            ? undefined
+            : displayName || undefined
+      const result = await joinSession(code, nameToSend)
       localStorage.setItem(getTokenKey(code), result.participant_token)
       setToken(result.participant_token)
+      setParticipant(result.participant)
+      setCurrentStageId(result.participant.current_stage_id)
       setSession(result.session)
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "No se pudo unir a la sesión")
+      toast.error(err instanceof Error ? err.message : "No se pudo unir a la tarea")
     } finally {
       setJoining(false)
     }
+  }
+
+  const handleResume = () => {
+    if (!pendingToken || !storedParticipant) return
+    setToken(pendingToken)
+    setParticipant(storedParticipant)
+    setCurrentStageId(storedParticipant.current_stage_id)
+    setPendingToken(null)
+  }
+
+  const handleSwitchIdentity = () => {
+    localStorage.removeItem(getTokenKey(code))
+    localStorage.removeItem(getDraftKey(code))
+    setPendingToken(null)
+    setStoredParticipant(null)
+    setDraftContent("")
+    setEditorContent("")
+    setDisplayName("")
+    setQuestions([])
   }
 
   const handleSend = async () => {
@@ -135,19 +195,34 @@ export default function StudentSessionPage() {
     try {
       setSending(true)
       const result = await sendSessionQuery(session.id, token, editorContent.trim())
-      setMessages((prev) => [
-        {
-          id: Date.now(),
-          query_text: editorContent.trim(),
-          response_text: result.message,
-          created_at: new Date().toISOString(),
-        },
-        ...prev,
-      ])
+      const generated = result.message
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((text) => ({ id: crypto.randomUUID(), text }))
+      if (generated.length === 0) {
+        throw new Error("La respuesta no incluyó preguntas")
+      }
+      setQuestions(generated)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "No se pudo enviar la consulta")
     } finally {
       setSending(false)
+    }
+  }
+
+  const handleStageChange = async (stageId: number) => {
+    if (!session || !token || stageId === currentStageId) return
+    try {
+      setChangingStage(true)
+      const updated = await setParticipantStage(session.id, token, stageId)
+      setCurrentStageId(updated.current_stage_id)
+      setParticipant(updated)
+      setQuestions([])
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "No se pudo cambiar de etapa")
+    } finally {
+      setChangingStage(false)
     }
   }
 
@@ -162,15 +237,66 @@ export default function StudentSessionPage() {
   if (!session) {
     return (
       <div className="flex h-screen flex-col items-center justify-center gap-4 bg-gray-50">
-        <p className="text-gray-600">Sesión no encontrada o inactiva.</p>
+        {loadError ? (
+          <>
+            <p className="text-gray-600">No se pudo cargar la tarea.</p>
+            <Button onClick={loadSession}>Reintentar</Button>
+          </>
+        ) : (
+          <p className="text-gray-600">Tarea no encontrada o inactiva.</p>
+        )}
       </div>
     )
   }
+
+  const stages = session.stages && session.stages.length > 0 ? session.stages : null
+  const firstStageInstructions = stages ? stages[0].instructions : session.instructions
 
   if (!token || draftContent === null) {
     const requiresAuth = session.access_level === "registered"
     const allowsGuests = session.access_level === "guests" || session.access_level === "both"
     const isLoggedIn = !!authUser
+    const showNameForm =
+      session.access_level === "guests" || (session.access_level === "both" && !isLoggedIn)
+    const showAccountEntry =
+      (requiresAuth && isLoggedIn) || (session.access_level === "both" && isLoggedIn)
+
+    if (checkingStored) {
+      return (
+        <div className="flex h-screen items-center justify-center bg-gray-50">
+          <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+        </div>
+      )
+    }
+
+    if (storedParticipant) {
+      return (
+        <div className="flex h-screen flex-col items-center justify-center bg-gray-50 p-4">
+          <div className="w-full max-w-md">
+            <h1 className="text-center text-2xl font-semibold text-gray-900">
+              {session.title}
+            </h1>
+            <p className="mt-2 text-center text-sm text-gray-500">
+              Ya te uniste a esta tarea desde este navegador como{" "}
+              <span className="font-medium text-gray-900">
+                {storedParticipant.display_name || "Invitado"}
+              </span>
+              .
+            </p>
+            <Button className="mt-6 w-full" onClick={handleResume}>
+              Seguir escribiendo
+            </Button>
+            <Button
+              variant="outline"
+              className="mt-3 w-full"
+              onClick={handleSwitchIdentity}
+            >
+              No soy yo, entrar con otro nombre
+            </Button>
+          </div>
+        </div>
+      )
+    }
 
     return (
       <div className="flex h-screen flex-col items-center justify-center bg-gray-50 p-4">
@@ -179,10 +305,22 @@ export default function StudentSessionPage() {
             {session.title}
           </h1>
 
+          {firstStageInstructions && (
+            <div className="mt-6 rounded-lg bg-blue-50 border border-blue-100 p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <BookOpen className="h-4 w-4 text-blue-600" />
+                <span className="text-sm font-medium text-blue-800">Consigna</span>
+              </div>
+              <p className="text-sm text-blue-900 whitespace-pre-wrap">
+                {firstStageInstructions}
+              </p>
+            </div>
+          )}
+
           {requiresAuth && !isLoggedIn && (
             <>
               <p className="mt-2 text-center text-sm text-gray-500">
-                Esta sesión requiere que inicies sesión para participar.
+                Esta tarea requiere que inicies sesión para participar.
               </p>
               <Button
                 className="mt-6 w-full"
@@ -194,7 +332,7 @@ export default function StudentSessionPage() {
             </>
           )}
 
-          {(requiresAuth && isLoggedIn) || (allowsGuests && isLoggedIn) ? (
+          {showAccountEntry && (
             <>
               <p className="mt-2 text-center text-sm text-gray-500">
                 Vas a entrar como{" "}
@@ -209,18 +347,18 @@ export default function StudentSessionPage() {
                 {joining ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 ) : (
-                  "Entrar a la sesión"
+                  "Entrar a la tarea"
                 )}
               </Button>
             </>
-          ) : null}
+          )}
 
-          {allowsGuests && !isLoggedIn && (
+          {showNameForm && (
             <>
               <p className="mt-2 text-center text-sm text-gray-500">
                 {session.access_level === "both"
                   ? "Ingresá tu nombre para unirte como invitado, o iniciá sesión si tenés cuenta."
-                  : "Ingresá tu nombre para unirte a la sesión."}
+                  : "Ingresá tu nombre para unirte a la tarea."}
               </p>
               <form onSubmit={handleJoin} className="mt-6 space-y-4">
                 <div className="space-y-2">
@@ -239,7 +377,7 @@ export default function StudentSessionPage() {
                   {joining ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   ) : (
-                    "Unirse a la sesión"
+                    "Unirse a la tarea"
                   )}
                 </Button>
               </form>
@@ -260,6 +398,12 @@ export default function StudentSessionPage() {
     )
   }
 
+  const currentStage =
+    stages?.find((s) => s.id === currentStageId) ?? (stages ? stages[0] : null)
+  const currentInstructions = currentStage ? currentStage.instructions : session.instructions
+  const currentPrompt = currentStage ? currentStage.prompt : session.prompt
+  const currentStageIndex = stages && currentStage ? stages.indexOf(currentStage) : 0
+
   return (
     <div className="flex h-screen bg-gray-50">
       {/* Main content area styled like /write */}
@@ -273,13 +417,43 @@ export default function StudentSessionPage() {
                 <Badge variant="outline" className="font-mono text-xs">
                   {session.llm_model_name}
                 </Badge>
-                {session.prompt && (
+                {currentPrompt && (
                   <Badge variant="secondary" className="text-xs">
-                    {session.prompt.name}
+                    {currentPrompt.name}
+                  </Badge>
+                )}
+                {participant?.display_name && (
+                  <Badge variant="outline" className="text-xs">
+                    {participant.display_name}
                   </Badge>
                 )}
               </div>
             </div>
+            {stages && stages.length > 1 && (
+              <div className="flex items-center gap-2 mr-4">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={changingStage || currentStageIndex <= 0}
+                  onClick={() => handleStageChange(stages[currentStageIndex - 1].id)}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  Anterior
+                </Button>
+                <span className="text-sm text-gray-600 whitespace-nowrap">
+                  Etapa {currentStageIndex + 1} de {stages.length}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={changingStage || currentStageIndex >= stages.length - 1}
+                  onClick={() => handleStageChange(stages[currentStageIndex + 1].id)}
+                >
+                  Siguiente
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            )}
             <Button
               size="sm"
               onClick={handleSend}
@@ -298,7 +472,7 @@ export default function StudentSessionPage() {
           {/* Scrollable area */}
           <div className="flex-1 min-h-0 overflow-y-auto">
             {/* Instructions banner */}
-            {session.instructions && (
+            {currentInstructions && (
               <div className="px-6 pt-4">
                 <div className="rounded-lg bg-blue-50 border border-blue-100 p-4">
                   <div className="flex items-center gap-2 mb-2">
@@ -306,36 +480,25 @@ export default function StudentSessionPage() {
                     <span className="text-sm font-medium text-blue-800">Consigna</span>
                   </div>
                   <p className="text-sm text-blue-900 whitespace-pre-wrap">
-                    {session.instructions}
+                    {currentInstructions}
                   </p>
                 </div>
               </div>
             )}
 
-            {/* Previous messages */}
-            {messages.length > 0 && (
-              <div className="px-6 pt-4 space-y-4">
-                {messages.map((msg) => (
-                  <div
-                    key={msg.id}
-                    className="rounded-lg border border-gray-100 bg-gray-50/50 p-4"
-                  >
-                    <div className="flex items-center gap-2 mb-2">
-                      <Sparkles className="h-4 w-4 text-yellow-500" />
-                      <span className="text-xs font-medium text-gray-500">
-                        {new Date(msg.created_at).toLocaleTimeString()}
-                      </span>
-                    </div>
-                    <div
-                      className="mb-2 text-sm font-medium text-gray-900 prose prose-sm max-w-none"
-                      dangerouslySetInnerHTML={{ __html: renderHtmlContent(msg.query_text) }}
+            {/* Generated questions */}
+            {questions.length > 0 && (
+              <div className="px-6 pt-4">
+                <div className="grid grid-cols-3 gap-4">
+                  {questions.slice(0, 3).map((question, index) => (
+                    <QuestionCard
+                      key={question.id}
+                      question={question}
+                      index={index}
+                      showHoverEffects={true}
                     />
-                    <div
-                      className="prose prose-sm max-w-none text-gray-700"
-                      dangerouslySetInnerHTML={{ __html: renderHtmlContent(msg.response_text) }}
-                    />
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
             )}
 

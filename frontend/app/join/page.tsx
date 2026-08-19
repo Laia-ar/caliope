@@ -24,7 +24,7 @@ export default function JoinPage() {
     try {
       const response = await fetch(`/api/sessions/by-code/${trimmed}`)
       if (!response.ok) {
-        throw new Error("Código inválido o sesión inactiva")
+        throw new Error("Código inválido o tarea inactiva")
       }
       router.push(`/session/${trimmed}`)
     } catch (err) {
@@ -39,7 +39,7 @@ export default function JoinPage() {
       <div className="w-full max-w-md">
         <h1 className="text-center text-3xl font-semibold text-gray-900">Calíope</h1>
         <p className="mt-2 text-center text-sm text-gray-500">
-          Ingresá el código de la sesión para participar.
+          Ingresá el código de la tarea para participar.
         </p>
 
         <form onSubmit={handleSubmit} className="mt-8 space-y-4">

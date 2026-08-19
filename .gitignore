@@ -7,3 +7,4 @@ app.db
 .next/
 next-env.d.ts
 users.json
+.venv/

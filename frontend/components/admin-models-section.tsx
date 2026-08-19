@@ -115,7 +115,7 @@ export function AdminModelsSection() {
       <div>
         <h2 className="text-xl font-semibold text-gray-900">Modelos disponibles</h2>
         <p className="text-sm text-gray-500">
-          Definí qué modelos pueden elegir los docentes al crear una sesión.
+          Definí qué modelos pueden elegir los docentes al crear una tarea.
         </p>
       </div>
 
