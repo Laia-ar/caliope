@@ -1,9 +1,114 @@
 import os
 import requests
+from html.parser import HTMLParser
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
+
+
+def _u16len(s: str) -> int:
+    """Longitud en unidades UTF-16, que es como indexa la Docs API."""
+    return len(s.encode('utf-16-le')) // 2
+
+
+_BLOCK_STYLES = {'h1': 'HEADING_1', 'h2': 'HEADING_2', 'h3': 'HEADING_3'}
+_BLOCK_TAGS = {'p', 'li', 'h1', 'h2', 'h3'}
+_INLINE_TAGS = {
+    'strong': ('bold', {'bold': True}),
+    'b': ('bold', {'bold': True}),
+    'em': ('italic', {'italic': True}),
+    'i': ('italic', {'italic': True}),
+}
+
+
+class _EditorHTMLParser(HTMLParser):
+    """Convierte el HTML del editor TipTap en bloques de texto con estilos
+    (headings, negrita, cursiva, links, listas) para la Docs API."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.blocks = []
+        self._cur = None       # bloque en construcción
+        self._inline = []      # stack de (tag, style_dict, start_char)
+        self._lists = []       # stack de 'ul'/'ol'
+
+    def _pos(self) -> int:
+        return self._cur['length'] if self._cur else 0
+
+    def _ensure_block(self):
+        if self._cur is None:
+            self._cur = {
+                'chars': [],
+                'length': 0,
+                'style': 'NORMAL_TEXT',
+                'list': self._lists[-1] if self._lists else None,
+                'spans': [],
+            }
+
+    def _close_block(self):
+        if self._cur is None:
+            return
+        text = ''.join(self._cur['chars'])
+        if text.strip():
+            self.blocks.append({
+                'text': text,
+                'style': self._cur['style'],
+                'list': self._cur['list'],
+                'spans': self._cur['spans'],
+            })
+        self._cur = None
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ('ul', 'ol'):
+            self._lists.append(tag)
+        elif tag in _BLOCK_TAGS:
+            self._close_block()
+            self._ensure_block()
+            self._cur['style'] = _BLOCK_STYLES.get(tag, 'NORMAL_TEXT')
+            if tag == 'li':
+                self._cur['list'] = self._lists[-1] if self._lists else 'ul'
+        elif tag in _INLINE_TAGS:
+            self._ensure_block()
+            name, style = _INLINE_TAGS[tag]
+            self._inline.append((name, style, self._pos()))
+        elif tag == 'a':
+            self._ensure_block()
+            href = dict(attrs).get('href', '')
+            self._inline.append(('link', {'link': {'url': href}}, self._pos()))
+        elif tag == 'br':
+            self.handle_data('\n')
+
+    def handle_endtag(self, tag):
+        if tag in ('ul', 'ol'):
+            if self._lists:
+                self._lists.pop()
+        elif tag in _BLOCK_TAGS:
+            self._close_block()
+        else:
+            name = 'link' if tag == 'a' else _INLINE_TAGS.get(tag, (None,))[0]
+            if name:
+                # Cierra el último inline abierto de ese tipo
+                for i in range(len(self._inline) - 1, -1, -1):
+                    if self._inline[i][0] == name:
+                        _, style, start = self._inline.pop(i)
+                        if self._cur and self._pos() > start:
+                            self._cur['spans'].append((start, self._pos(), style))
+                        break
+
+    def handle_data(self, data):
+        self._ensure_block()
+        self._cur['chars'].append(data)
+        self._cur['length'] += len(data)
+
+
+def editor_html_to_blocks(html: str) -> list[dict]:
+    """Convierte HTML del editor a bloques para create_google_doc."""
+    parser = _EditorHTMLParser()
+    parser.feed(html or '')
+    parser.close()
+    parser._close_block()
+    return parser.blocks
 
 
 SCOPES = [
@@ -70,6 +175,9 @@ def create_google_doc(creds: Credentials, title: str, content_parts: list[dict],
 
     content_parts is a list of dicts like:
       {'text': '...', 'heading': True|False}
+    o bloques generados por editor_html_to_blocks:
+      {'text': '...', 'style': 'NORMAL_TEXT'|'HEADING_1'|...,
+       'list': 'ul'|'ol'|None, 'spans': [(start, end, textStyle), ...]}
     share_anyone adds an anyone-with-the-link writer permission; disable it
     for student-owned docs (Classroom handles sharing on turn-in).
     """
@@ -85,24 +193,50 @@ def create_google_doc(creds: Credentials, title: str, content_parts: list[dict],
         text = part.get('text', '')
         if not text:
             continue
+        block_len = _u16len(text)
         requests_batch.append({
             'insertText': {
                 'location': {'index': end_index},
                 'text': text + '\n',
             }
         })
-        if part.get('heading'):
+        style = part.get('style') or ('HEADING_2' if part.get('heading') else None)
+        if style and style != 'NORMAL_TEXT':
             requests_batch.append({
                 'updateParagraphStyle': {
                     'range': {
                         'startIndex': end_index,
-                        'endIndex': end_index + len(text),
+                        'endIndex': end_index + block_len,
                     },
-                    'paragraphStyle': {'namedStyleType': 'HEADING_2'},
+                    'paragraphStyle': {'namedStyleType': style},
                     'fields': 'namedStyleType',
                 }
             })
-        end_index += len(text) + 1
+        if part.get('list'):
+            preset = ('NUMBERED_DECIMAL_ALPHA_ROMAN' if part['list'] == 'ol'
+                      else 'BULLET_DISC_CIRCLE_SQUARE')
+            requests_batch.append({
+                'createParagraphBullets': {
+                    'range': {
+                        'startIndex': end_index,
+                        'endIndex': end_index + block_len + 1,
+                    },
+                    'bulletPreset': preset,
+                }
+            })
+        for span_start, span_end, text_style in part.get('spans', []):
+            start = end_index + _u16len(text[:span_start])
+            end = end_index + _u16len(text[:span_end])
+            if end <= start:
+                continue
+            requests_batch.append({
+                'updateTextStyle': {
+                    'range': {'startIndex': start, 'endIndex': end},
+                    'textStyle': text_style,
+                    'fields': ','.join(text_style.keys()),
+                }
+            })
+        end_index += block_len + 1
 
     if requests_batch:
         docs_service.documents().batchUpdate(
