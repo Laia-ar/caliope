@@ -27,6 +27,7 @@ from google_classroom import (
     list_teacher_courses,
     list_coursework,
     create_google_doc,
+    editor_html_to_blocks,
     create_coursework_with_materials,
     create_coursework_material,
     create_coursework,
@@ -2030,7 +2031,7 @@ def submit_session_work(session_id):
     elif s.instructions:
         content_parts.append({'text': f"Consigna: {s.instructions}"})
     content_parts.append({'text': ''})
-    content_parts.append({'text': text})
+    content_parts.extend(editor_html_to_blocks(text))
 
     try:
         doc = create_google_doc(creds, f"{s.title} - {display_name}", content_parts, share_anyone=False)
@@ -2246,7 +2247,8 @@ def _build_session_export_materials(creds, session_obj, session_id):
         content_parts.append({'text': 'Interacciones', 'heading': True})
         for idx, q in enumerate(queries, start=1):
             content_parts.append({'text': f"Interacción {idx}", 'heading': True})
-            content_parts.append({'text': f"Texto del alumno:\n{q.query_text}", 'heading': False})
+            content_parts.append({'text': 'Texto del alumno:', 'heading': False})
+            content_parts.extend(editor_html_to_blocks(q.query_text))
             content_parts.append({'text': f"Respuesta de la herramienta:\n{q.response_text or '(sin respuesta)'}", 'heading': False})
 
         doc_info = create_google_doc(creds, title, content_parts)
