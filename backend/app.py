@@ -7,6 +7,7 @@ import os
 import json
 import shutil
 import secrets
+import time
 import uuid
 import random
 import string
@@ -2035,7 +2036,17 @@ def submit_session_work(session_id):
         doc = create_google_doc(creds, f"{s.title} - {display_name}", content_parts, share_anyone=False)
         submissions = list_my_submissions(creds, s.classroom_course_id, s.classroom_coursework_id)
         if not submissions:
-            return jsonify({'error': 'No encontramos una entrega tuya en Classroom. ¿Estás inscripto en el curso?'}), 400
+            # Classroom crea la submission al publicar el coursework; recién
+            # publicado puede haber lag de replicación. Reintentamos una vez.
+            time.sleep(2)
+            submissions = list_my_submissions(creds, s.classroom_course_id, s.classroom_coursework_id)
+        if not submissions:
+            app.logger.warning(
+                'No submission found: user=%s course=%s coursework=%s',
+                current_user.id, s.classroom_course_id, s.classroom_coursework_id)
+            return jsonify({
+                'error': 'No encontramos una entrega tuya en Classroom. Verificá que estés inscripto como alumno (no docente) y abrí la tarea en Classroom una vez antes de reintentar.',
+            }), 400
         submission_id = submissions[0]['id']
         add_submission_drive_attachment(
             creds, s.classroom_course_id, s.classroom_coursework_id, submission_id, doc['id'], doc['title']
