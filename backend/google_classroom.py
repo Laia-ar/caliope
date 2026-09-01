@@ -11,12 +11,10 @@ SCOPES = [
     'email',
     'profile',
     'https://www.googleapis.com/auth/classroom.courses.readonly',
-    'https://www.googleapis.com/auth/classroom.coursework.students.readonly',
     'https://www.googleapis.com/auth/classroom.coursework.students',
     'https://www.googleapis.com/auth/classroom.coursework.me',
     'https://www.googleapis.com/auth/classroom.courseworkmaterials',
     'https://www.googleapis.com/auth/drive.file',
-    'https://www.googleapis.com/auth/documents',
 ]
 
 

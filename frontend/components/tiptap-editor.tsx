@@ -135,7 +135,7 @@ export const TipTapEditor = React.memo(function TipTapEditor({ onContentChange, 
   return (
     <div className="w-full">
       {/* Toolbar */}
-      <div className="border-b border-border px-6 py-3 flex items-center gap-2 bg-muted/30">
+      <div className="sticky top-0 z-10 border-b border-border px-6 py-3 flex items-center gap-2 bg-background">
         {/* Text Style Dropdown */}
         <Select value={getCurrentTextStyle()} onValueChange={handleTextStyleChange}>
           <SelectTrigger className="w-32">
