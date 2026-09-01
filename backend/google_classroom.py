@@ -214,7 +214,7 @@ def add_submission_drive_attachment(
     service = build('classroom', 'v1', credentials=creds)
     body = {
         'addAttachments': [
-            {'driveFile': {'driveFile': {'id': file_id, 'title': title}}}
+            {'driveFile': {'id': file_id, 'title': title}}
         ]
     }
     return service.courses().courseWork().studentSubmissions().modifyAttachments(
