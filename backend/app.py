@@ -285,12 +285,10 @@ google = oauth.register(
             'email',
             'profile',
             'https://www.googleapis.com/auth/classroom.courses.readonly',
-            'https://www.googleapis.com/auth/classroom.coursework.students.readonly',
             'https://www.googleapis.com/auth/classroom.coursework.students',
             'https://www.googleapis.com/auth/classroom.coursework.me',
             'https://www.googleapis.com/auth/classroom.courseworkmaterials',
             'https://www.googleapis.com/auth/drive.file',
-            'https://www.googleapis.com/auth/documents',
         ]),
         'token_endpoint_auth_method': 'client_secret_post'
     },
@@ -1931,6 +1929,27 @@ def set_participant_stage(session_id):
     participant.current_stage_id = stage.id
     db.session.commit()
     return jsonify({'id': participant.id, 'current_stage_id': participant.current_stage_id})
+
+@app.route('/api/sessions/<int:session_id>/participant/queries', methods=['GET'])
+def get_participant_queries(session_id):
+    token = request.headers.get('X-Participant-Token', '')
+    participant = SessionParticipant.query.filter_by(token=token, session_id=session_id).first() if token else None
+    if not participant:
+        return jsonify({'error': 'Invalid participant token'}), 401
+    queries = (SessionQuery.query
+               .filter_by(participant_id=participant.id, session_id=session_id)
+               .order_by(SessionQuery.created_at.asc())
+               .all())
+    return jsonify({
+        'queries': [{
+            'id': q.id,
+            'query_text': q.query_text,
+            'response_text': q.response_text,
+            'stage_id': q.stage_id,
+            'stage_position': q.stage.position if q.stage else None,
+            'created_at': q.created_at.isoformat() if q.created_at else None,
+        } for q in queries]
+    })
 
 @app.route('/api/sessions/<int:session_id>/link-classroom', methods=['POST'])
 @login_required

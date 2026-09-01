@@ -7,7 +7,14 @@ import { Badge } from "@/components/ui/badge"
 import { TipTapEditor } from "@/components/tiptap-editor"
 import { QuestionCard } from "@/components/question-card"
 import { toast } from "sonner"
-import { Send, Loader2, BookOpen, LogIn, ChevronLeft, ChevronRight, Upload, CheckCircle2 } from "lucide-react"
+import { Send, Loader2, BookOpen, LogIn, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Upload, CheckCircle2, History } from "lucide-react"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { ChecklistConfirmDialog } from "@/components/checklist-confirm-dialog"
 import {
   getSessionByCode,
   joinSession,
@@ -15,8 +22,10 @@ import {
   getParticipantMe,
   setParticipantStage,
   submitSessionWork,
+  getParticipantQueries,
   type Session,
   type ParticipantInfo,
+  type SessionQueryItem,
 } from "@/lib/sessions"
 
 interface Question {
@@ -64,6 +73,12 @@ export default function StudentSessionPage() {
   const [submitted, setSubmitted] = useState<string | null>(null)
   const [submissionUrl, setSubmissionUrl] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [showConsigna, setShowConsigna] = useState(true)
+  const [stageDialogOpen, setStageDialogOpen] = useState(false)
+  const [submitDialogOpen, setSubmitDialogOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [historyQueries, setHistoryQueries] = useState<SessionQueryItem[]>([])
+  const [loadingHistory, setLoadingHistory] = useState(false)
 
   const loadSession = useCallback(async () => {
     try {
@@ -236,7 +251,7 @@ export default function StudentSessionPage() {
     }
   }
 
-  const handleSubmitWork = async () => {
+  const handleSubmitClick = () => {
     if (!session) return
     if (!authUser) {
       toast.info("Para entregar necesitás iniciar sesión con tu cuenta institucional de Google")
@@ -247,19 +262,22 @@ export default function StudentSessionPage() {
       toast.error("Escribí algo antes de entregar")
       return
     }
-    const confirmed = window.confirm(
-      "¿Entregar tu texto a Google Classroom? Se creará un documento con tu nombre y quedará entregado."
-    )
-    if (!confirmed) return
+    setSubmitDialogOpen(true)
+  }
+
+  const handleSubmitWork = async () => {
+    if (!session) return
     try {
       setSubmitting(true)
       const result = await submitSessionWork(session.id, token, editorContent.trim())
+      setSubmitDialogOpen(false)
       setSubmitted(result.submitted_at)
       setSubmissionUrl(result.submission_url)
       toast.success("¡Entregado! Tu texto ya está en Classroom.")
     } catch (err) {
       const message = err instanceof Error ? err.message : "No se pudo entregar"
       if (message.includes("google_auth_required")) {
+        setSubmitDialogOpen(false)
         toast.error("Necesitás autorizar tu cuenta de Google", {
           action: {
             label: "Autorizar",
@@ -272,6 +290,20 @@ export default function StudentSessionPage() {
       }
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  const handleOpenHistory = async () => {
+    if (!session || !token) return
+    setHistoryOpen(true)
+    try {
+      setLoadingHistory(true)
+      const queries = await getParticipantQueries(session.id, token)
+      setHistoryQueries(queries)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "No se pudo cargar el historial")
+    } finally {
+      setLoadingHistory(false)
     }
   }
 
@@ -496,9 +528,9 @@ export default function StudentSessionPage() {
                   variant="outline"
                   size="sm"
                   disabled={changingStage || currentStageIndex >= stages.length - 1}
-                  onClick={() => handleStageChange(stages[currentStageIndex + 1].id)}
+                  onClick={() => setStageDialogOpen(true)}
                 >
-                  Siguiente
+                  Terminé
                   <ChevronRight className="h-4 w-4" />
                 </Button>
               </div>
@@ -520,7 +552,7 @@ export default function StudentSessionPage() {
                   size="sm"
                   variant="outline"
                   className="mr-2"
-                  onClick={handleSubmitWork}
+                  onClick={handleSubmitClick}
                   disabled={submitting}
                 >
                   {submitting ? (
@@ -532,6 +564,15 @@ export default function StudentSessionPage() {
                 </Button>
               )
             )}
+            <Button
+              size="sm"
+              variant="outline"
+              className="mr-2"
+              onClick={handleOpenHistory}
+            >
+              <History className="mr-2 h-4 w-4" />
+              Historial
+            </Button>
             <Button
               size="sm"
               onClick={handleSend}
@@ -547,40 +588,50 @@ export default function StudentSessionPage() {
             </Button>
           </header>
 
-          {/* Scrollable area */}
-          <div className="flex-1 min-h-0 overflow-y-auto">
-            {/* Instructions banner */}
-            {currentInstructions && (
-              <div className="px-6 pt-4">
-                <div className="rounded-lg bg-blue-50 border border-blue-100 p-4">
-                  <div className="flex items-center gap-2 mb-2">
-                    <BookOpen className="h-4 w-4 text-blue-600" />
-                    <span className="text-sm font-medium text-blue-800">Consigna</span>
-                  </div>
-                  <p className="text-sm text-blue-900 whitespace-pre-wrap">
+          {/* Instructions banner: fixed on top, collapsible */}
+          {currentInstructions && (
+            <div className="px-6 pt-4 shrink-0">
+              <div className="rounded-lg bg-blue-50 border border-blue-100 p-4">
+                <button
+                  type="button"
+                  onClick={() => setShowConsigna((v) => !v)}
+                  className="flex items-center gap-2 w-full text-left cursor-pointer"
+                >
+                  <BookOpen className="h-4 w-4 text-blue-600" />
+                  <span className="text-sm font-medium text-blue-800">Consigna</span>
+                  {showConsigna ? (
+                    <ChevronUp className="h-4 w-4 text-blue-600 ml-auto" />
+                  ) : (
+                    <ChevronDown className="h-4 w-4 text-blue-600 ml-auto" />
+                  )}
+                </button>
+                {showConsigna && (
+                  <p className="mt-2 text-sm text-blue-900 whitespace-pre-wrap">
                     {currentInstructions}
                   </p>
-                </div>
+                )}
               </div>
-            )}
+            </div>
+          )}
 
-            {/* Generated questions */}
-            {questions.length > 0 && (
-              <div className="px-6 pt-4">
-                <div className="grid grid-cols-3 gap-4">
-                  {questions.slice(0, 3).map((question, index) => (
-                    <QuestionCard
-                      key={question.id}
-                      question={question}
-                      index={index}
-                      showHoverEffects={true}
-                    />
-                  ))}
-                </div>
+          {/* Generated questions: always visible, own bounded scroll */}
+          {questions.length > 0 && (
+            <div className="px-6 pt-4 shrink-0 max-h-56 overflow-y-auto">
+              <div className="grid grid-cols-3 gap-4">
+                {questions.slice(0, 3).map((question, index) => (
+                  <QuestionCard
+                    key={question.id}
+                    question={question}
+                    index={index}
+                    showHoverEffects={true}
+                  />
+                ))}
               </div>
-            )}
+            </div>
+          )}
 
-            {/* Editor container */}
+          {/* Editor: the only scrollable area */}
+          <div className="flex-1 min-h-0 overflow-y-auto">
             <div className="px-6 py-4">
               <div className="flex-1 min-h-[40dvh]">
                 <TipTapEditor
@@ -592,6 +643,87 @@ export default function StudentSessionPage() {
           </div>
         </div>
       </main>
+
+      {/* Checklist antes de pasar de etapa */}
+      <ChecklistConfirmDialog
+        open={stageDialogOpen}
+        onOpenChange={setStageDialogOpen}
+        title="¿Terminaste esta etapa?"
+        description="Antes de pasar a la siguiente etapa, verificá:"
+        items={[
+          "Revisé mi texto",
+          "Leí las preguntas de Calíope",
+          "Sé que puedo volver con el botón Anterior",
+        ]}
+        confirmLabel="Pasar a la siguiente etapa"
+        loading={changingStage}
+        onConfirm={() => {
+          if (!stages) return
+          setStageDialogOpen(false)
+          handleStageChange(stages[currentStageIndex + 1].id)
+        }}
+      />
+
+      {/* Checklist antes de entregar */}
+      <ChecklistConfirmDialog
+        open={submitDialogOpen}
+        onOpenChange={setSubmitDialogOpen}
+        title="¿Entregar tu texto?"
+        description="Se creará un documento de Google con tu nombre y quedará entregado en Classroom. Antes de entregar, verificá:"
+        items={[
+          "Mi texto está terminado",
+          "Revisé que diga lo que quiero decir",
+        ]}
+        confirmLabel="Entregar"
+        loading={submitting}
+        onConfirm={handleSubmitWork}
+      />
+
+      {/* Historial de preguntas */}
+      <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Historial de preguntas</DialogTitle>
+          </DialogHeader>
+          {loadingHistory ? (
+            <div className="flex justify-center py-8">
+              <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+            </div>
+          ) : historyQueries.length === 0 ? (
+            <p className="text-sm text-gray-500 py-4">
+              Todavía no hiciste preguntas en esta tarea.
+            </p>
+          ) : (
+            <div className="space-y-6">
+              {historyQueries.map((q) => (
+                <div key={q.id} className="border-b border-gray-100 pb-4 last:border-0">
+                  <div className="flex items-center gap-2 mb-2">
+                    {q.stage_position && (
+                      <Badge variant="outline" className="text-xs">
+                        Etapa {q.stage_position}
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-500 mb-2 line-clamp-2">
+                    Sobre: {q.query_text.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim()}
+                  </p>
+                  <ul className="space-y-1">
+                    {(q.response_text || "")
+                      .split("\n")
+                      .map((line) => line.trim())
+                      .filter(Boolean)
+                      .map((line, i) => (
+                        <li key={i} className="text-sm text-gray-800">
+                          {line}
+                        </li>
+                      ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

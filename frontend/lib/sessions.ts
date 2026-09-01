@@ -200,6 +200,19 @@ export async function setParticipantStage(
   })) as ParticipantInfo
 }
 
+export async function getParticipantQueries(
+  sessionId: number,
+  token: string
+): Promise<SessionQueryItem[]> {
+  const result = await apiCall(`/api/sessions/${sessionId}/participant/queries`, {
+    headers: {
+      "X-Participant-Token": token,
+    },
+  })
+  const data = result && typeof result === "object" ? (result as Record<string, unknown>) : {}
+  return Array.isArray(data.queries) ? (data.queries as SessionQueryItem[]) : []
+}
+
 export async function submitSessionWork(
   sessionId: number,
   token: string,
