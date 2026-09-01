@@ -484,6 +484,10 @@ export default function StudentSessionPage() {
   const currentInstructions = currentStage ? currentStage.instructions : session.instructions
   const currentPrompt = currentStage ? currentStage.prompt : session.prompt
   const currentStageIndex = stages && currentStage ? stages.indexOf(currentStage) : 0
+  const isLastStage = stages ? currentStageIndex >= stages.length - 1 : true
+  // En la última etapa "Terminé" lleva a entregar; si no hay entrega posible, se oculta
+  const showTermineButton =
+    !!stages && stages.length > 1 && (!isLastStage || (!!session.classroom_linked && !submitted))
 
   return (
     <div className="flex h-screen bg-gray-50">
@@ -524,15 +528,17 @@ export default function StudentSessionPage() {
                 <span className="text-sm text-gray-600 whitespace-nowrap">
                   Etapa {currentStageIndex + 1} de {stages.length}
                 </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={changingStage || currentStageIndex >= stages.length - 1}
-                  onClick={() => setStageDialogOpen(true)}
-                >
-                  Terminé
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
+                {showTermineButton && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={changingStage || submitting}
+                    onClick={() => (isLastStage ? handleSubmitClick() : setStageDialogOpen(true))}
+                  >
+                    Terminé
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                )}
               </div>
             )}
             {session.classroom_linked && (
