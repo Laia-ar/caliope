@@ -19,6 +19,7 @@ interface ChecklistConfirmDialogProps {
   description?: string
   items: string[]
   confirmLabel: string
+  cancelLabel?: string
   onConfirm: () => void
   loading?: boolean
 }
@@ -30,6 +31,7 @@ export function ChecklistConfirmDialog({
   description,
   items,
   confirmLabel,
+  cancelLabel = "Volver",
   onConfirm,
   loading = false,
 }: ChecklistConfirmDialogProps) {
@@ -74,7 +76,7 @@ export function ChecklistConfirmDialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={loading}>
-            Volver
+            {cancelLabel}
           </Button>
           <Button onClick={onConfirm} disabled={!allChecked || loading}>
             {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}

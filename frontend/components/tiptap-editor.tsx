@@ -12,9 +12,10 @@ import { useState, useEffect, useCallback, useMemo } from "react"
 interface TipTapEditorProps {
   onContentChange?: (content: string) => void
   initialContent?: string
+  readOnly?: boolean
 }
 
-export const TipTapEditor = React.memo(function TipTapEditor({ onContentChange, initialContent }: TipTapEditorProps) {
+export const TipTapEditor = React.memo(function TipTapEditor({ onContentChange, initialContent, readOnly = false }: TipTapEditorProps) {
   const [showLinkDialog, setShowLinkDialog] = useState(false)
   const [linkUrl, setLinkUrl] = useState("")
 
@@ -53,6 +54,10 @@ export const TipTapEditor = React.memo(function TipTapEditor({ onContentChange, 
   );
 
   const editor = useEditor(editorConfig)
+
+  useEffect(() => {
+    editor?.setEditable(!readOnly)
+  }, [editor, readOnly])
 
   useEffect(() => {
     if (editor && initialContent && initialContent !== editor.getHTML()) {
@@ -135,7 +140,7 @@ export const TipTapEditor = React.memo(function TipTapEditor({ onContentChange, 
   return (
     <div className="w-full">
       {/* Toolbar */}
-      <div className="sticky top-0 z-10 border-b border-border px-6 py-3 flex items-center gap-2 bg-background">
+      <div className={`sticky top-0 z-10 border-b border-border px-6 py-3 flex items-center gap-2 bg-background${readOnly ? " pointer-events-none opacity-50" : ""}`}>
         {/* Text Style Dropdown */}
         <Select value={getCurrentTextStyle()} onValueChange={handleTextStyleChange}>
           <SelectTrigger className="w-32">

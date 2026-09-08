@@ -485,9 +485,8 @@ export default function StudentSessionPage() {
   const currentPrompt = currentStage ? currentStage.prompt : session.prompt
   const currentStageIndex = stages && currentStage ? stages.indexOf(currentStage) : 0
   const isLastStage = stages ? currentStageIndex >= stages.length - 1 : true
-  // En la última etapa "Terminé" lleva a entregar; si no hay entrega posible, se oculta
-  const showTermineButton =
-    !!stages && stages.length > 1 && (!isLastStage || (!!session.classroom_linked && !submitted))
+  // "Terminé" solo avanza etapas intermedias; en la última etapa corresponde "Entregar"
+  const showTermineButton = !!stages && stages.length > 1 && !isLastStage
 
   return (
     <div className="flex h-screen bg-gray-50">
@@ -533,7 +532,7 @@ export default function StudentSessionPage() {
                     variant="outline"
                     size="sm"
                     disabled={changingStage || submitting}
-                    onClick={() => (isLastStage ? handleSubmitClick() : setStageDialogOpen(true))}
+                    onClick={() => setStageDialogOpen(true)}
                   >
                     Terminé
                     <ChevronRight className="h-4 w-4" />
@@ -541,34 +540,33 @@ export default function StudentSessionPage() {
                 )}
               </div>
             )}
-            {session.classroom_linked && (
-              submitted ? (
-                <Badge variant="secondary" className="mr-2 bg-green-100 text-green-800">
-                  <CheckCircle2 className="mr-1 h-3 w-3" />
-                  {submissionUrl ? (
-                    <a href={submissionUrl} target="_blank" rel="noopener noreferrer">
-                      Entregado
-                    </a>
-                  ) : (
-                    "Entregado"
-                  )}
-                </Badge>
-              ) : (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="mr-2"
-                  onClick={handleSubmitClick}
-                  disabled={submitting}
-                >
-                  {submitting ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Upload className="mr-2 h-4 w-4" />
-                  )}
-                  Entregar
-                </Button>
-              )
+            {session.classroom_linked && submitted && (
+              <Badge variant="secondary" className="mr-2 bg-green-100 text-green-800">
+                <CheckCircle2 className="mr-1 h-3 w-3" />
+                {submissionUrl ? (
+                  <a href={submissionUrl} target="_blank" rel="noopener noreferrer">
+                    Entregado
+                  </a>
+                ) : (
+                  "Entregado"
+                )}
+              </Badge>
+            )}
+            {session.classroom_linked && !submitted && isLastStage && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="mr-2"
+                onClick={handleSubmitClick}
+                disabled={submitting}
+              >
+                {submitting ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Upload className="mr-2 h-4 w-4" />
+                )}
+                Entregar
+              </Button>
             )}
             <Button
               size="sm"
@@ -643,6 +641,7 @@ export default function StudentSessionPage() {
                 <TipTapEditor
                   initialContent={draftContent || ""}
                   onContentChange={setEditorContent}
+                  readOnly={!!submitted}
                 />
               </div>
             </div>
@@ -655,11 +654,11 @@ export default function StudentSessionPage() {
         open={stageDialogOpen}
         onOpenChange={setStageDialogOpen}
         title="¿Terminaste esta etapa?"
-        description="Antes de pasar a la siguiente etapa, verificá:"
+        description="Antes de pasar a la siguiente etapa, verificá estos puntos:"
         items={[
-          "Revisé mi texto",
+          "Ya escribí el texto completo",
           "Leí las preguntas de Calíope",
-          "Sé que puedo volver con el botón Anterior",
+          "Sé que puedo volver a esta etapa con el botón Anterior",
         ]}
         confirmLabel="Pasar a la siguiente etapa"
         loading={changingStage}
@@ -674,13 +673,14 @@ export default function StudentSessionPage() {
       <ChecklistConfirmDialog
         open={submitDialogOpen}
         onOpenChange={setSubmitDialogOpen}
-        title="¿Entregar tu texto?"
-        description="Se creará un documento de Google con tu nombre y quedará entregado en Classroom. Antes de entregar, verificá:"
+        title="Vas a entregar tu trabajo en Classroom"
+        description="Tu texto será entregado a tu docente en Classroom y ya no vas a poder seguir escribiendo en Calíope."
         items={[
           "Mi texto está terminado",
           "Revisé que diga lo que quiero decir",
         ]}
         confirmLabel="Entregar"
+        cancelLabel="Seguir trabajando"
         loading={submitting}
         onConfirm={handleSubmitWork}
       />
