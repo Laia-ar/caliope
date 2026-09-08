@@ -32,6 +32,7 @@ import {
   type ClassroomCourse,
 } from "@/lib/classroom"
 import { renderHtmlContent } from "@/lib/html"
+import { stageTheme, STATUS_THEME, type ParticipantStatus } from "@/lib/stage-colors"
 import {
   Dialog,
   DialogContent,
@@ -480,6 +481,42 @@ export default function SessionDetailPage() {
                     )}
                   </div>
 
+                  {session.participants && session.participants.length > 0 && (
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                        Alumnos ({session.participants.length})
+                      </p>
+                      <div className="mt-1 space-y-1">
+                        {session.participants.map((p) => {
+                          const statusTheme = STATUS_THEME[p.status as ParticipantStatus] ?? STATUS_THEME.sin_empezar
+                          const stageLabel =
+                            session.stages && session.stages.length > 1
+                              ? `Etapa ${p.stage_position} de ${session.stages.length}`
+                              : null
+                          return (
+                            <div
+                              key={p.participant_id}
+                              className="flex items-center justify-between gap-3 rounded-md border border-gray-100 px-3 py-2 text-sm"
+                            >
+                              <span className="text-gray-700">{p.participant_name}</span>
+                              <div className="flex items-center gap-3">
+                                {stageLabel && (
+                                  <span className="text-xs text-gray-500">{stageLabel}</span>
+                                )}
+                                <span
+                                  className="rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wide"
+                                  style={{ color: statusTheme.color, backgroundColor: statusTheme.bg }}
+                                >
+                                  {statusTheme.label}
+                                </span>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+
                   {session.submissions && session.submissions.length > 0 && (
                     <div>
                       <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
@@ -521,9 +558,16 @@ export default function SessionDetailPage() {
                       {editingStages ? (
                         <div className="mt-1 space-y-3">
                           {stageDrafts.map((draft, index) => (
-                            <div key={index} className="space-y-2 rounded-md border border-gray-200 p-2">
+                            <div
+                              key={index}
+                              className="space-y-2 rounded-md p-2"
+                              style={{
+                                backgroundColor: stageTheme(index).bg,
+                                border: `1px solid ${stageTheme(index).border}`,
+                              }}
+                            >
                               <div className="flex items-center justify-between">
-                                <span className="text-xs font-medium text-gray-500">
+                                <span className="text-xs font-medium" style={{ color: stageTheme(index).color }}>
                                   Etapa {index + 1}
                                 </span>
                                 <Button
@@ -605,8 +649,15 @@ export default function SessionDetailPage() {
                       ) : (
                         <div className="mt-1 space-y-3">
                           {session.stages.map((stage) => (
-                            <div key={stage.id} className="rounded-md border border-gray-100 p-2">
-                              <p className="text-xs font-medium text-gray-500">
+                            <div
+                              key={stage.id}
+                              className="rounded-md p-2"
+                              style={{
+                                backgroundColor: stageTheme(stage.position - 1).bg,
+                                border: `1px solid ${stageTheme(stage.position - 1).border}`,
+                              }}
+                            >
+                              <p className="text-xs font-medium" style={{ color: stageTheme(stage.position - 1).color }}>
                                 Etapa {stage.position}
                                 {stage.prompt ? ` · ${stage.prompt.name}` : ""}
                               </p>

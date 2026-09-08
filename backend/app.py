@@ -1659,15 +1659,30 @@ def get_session(session_id):
         if g:
             grade = {'id': g.id, 'name': g.name, 'institution_id': g.institution_id}
     submissions = []
+    participants = []
     for p in s.participants:
+        name = p.display_name or (p.user.name if p.user else None) or 'Anónimo'
         if p.submitted_at:
-            name = p.display_name or (p.user.name if p.user else None) or 'Anónimo'
             submissions.append({
                 'participant_id': p.id,
                 'participant_name': name,
                 'submitted_at': p.submitted_at.isoformat(),
                 'submission_url': p.submission_url,
             })
+        stage_position = p.current_stage.position if p.current_stage else 1
+        if p.submitted_at:
+            status = 'entregada'
+        elif stage_position <= 1:
+            status = 'escribiendo' if p.queries else 'sin_empezar'
+        else:
+            status = 'revisando'
+        participants.append({
+            'participant_id': p.id,
+            'participant_name': name,
+            'stage_position': stage_position,
+            'submitted_at': p.submitted_at.isoformat() if p.submitted_at else None,
+            'status': status,
+        })
     return jsonify({
         'id': s.id,
         'title': s.title,
@@ -1682,6 +1697,7 @@ def get_session(session_id):
         'classroom_coursework_id': s.classroom_coursework_id,
         'classroom_coursework_url': s.classroom_coursework_url,
         'submissions': submissions,
+        'participants': participants,
         'created_at': s.created_at.isoformat(),
         'updated_at': s.updated_at.isoformat()
     })

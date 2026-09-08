@@ -39,6 +39,7 @@ export interface Session {
   classroom_coursework_id?: string | null
   classroom_coursework_url?: string | null
   submissions?: SubmissionInfo[]
+  participants?: ParticipantMonitoringInfo[]
   created_at: string
   updated_at?: string
   teacher_name?: string
@@ -68,6 +69,14 @@ export interface SubmissionInfo {
   participant_name: string
   submitted_at: string
   submission_url: string | null
+}
+
+export interface ParticipantMonitoringInfo {
+  participant_id: number
+  participant_name: string
+  stage_position: number
+  submitted_at: string | null
+  status: "sin_empezar" | "escribiendo" | "revisando" | "entregada"
 }
 
 export interface CreateSessionData {

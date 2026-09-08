@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge"
 import { TipTapEditor } from "@/components/tiptap-editor"
 import { QuestionCard } from "@/components/question-card"
 import { toast } from "sonner"
-import { Send, Loader2, BookOpen, LogIn, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Upload, CheckCircle2, History } from "lucide-react"
+import { Send, Loader2, BookOpen, LogIn, ChevronDown, ChevronUp, CheckCircle2, History } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -15,6 +15,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { ChecklistConfirmDialog } from "@/components/checklist-confirm-dialog"
+import { stageTheme } from "@/lib/stage-colors"
 import {
   getSessionByCode,
   joinSession,
@@ -485,8 +486,11 @@ export default function StudentSessionPage() {
   const currentPrompt = currentStage ? currentStage.prompt : session.prompt
   const currentStageIndex = stages && currentStage ? stages.indexOf(currentStage) : 0
   const isLastStage = stages ? currentStageIndex >= stages.length - 1 : true
-  // "Terminé" solo avanza etapas intermedias; en la última etapa corresponde "Entregar"
-  const showTermineButton = !!stages && stages.length > 1 && !isLastStage
+  const hasMultipleStages = !!stages && stages.length > 1
+  const theme = stageTheme(currentStageIndex)
+  // Acción principal de la barra de la consigna: avanzar etapa o entregar
+  const showStageAction = hasMultipleStages && !isLastStage
+  const showSubmitAction = !!session.classroom_linked && !submitted && (hasMultipleStages ? isLastStage : true)
 
   return (
     <div className="flex h-screen bg-gray-50">
@@ -513,33 +517,6 @@ export default function StudentSessionPage() {
                 )}
               </div>
             </div>
-            {stages && stages.length > 1 && (
-              <div className="flex items-center gap-2 mr-4">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={changingStage || currentStageIndex <= 0}
-                  onClick={() => handleStageChange(stages[currentStageIndex - 1].id)}
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                  Anterior
-                </Button>
-                <span className="text-sm text-gray-600 whitespace-nowrap">
-                  Etapa {currentStageIndex + 1} de {stages.length}
-                </span>
-                {showTermineButton && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={changingStage || submitting}
-                    onClick={() => setStageDialogOpen(true)}
-                  >
-                    Terminé
-                    <ChevronRight className="h-4 w-4" />
-                  </Button>
-                )}
-              </div>
-            )}
             {session.classroom_linked && submitted && (
               <Badge variant="secondary" className="mr-2 bg-green-100 text-green-800">
                 <CheckCircle2 className="mr-1 h-3 w-3" />
@@ -551,22 +528,6 @@ export default function StudentSessionPage() {
                   "Entregado"
                 )}
               </Badge>
-            )}
-            {session.classroom_linked && !submitted && isLastStage && (
-              <Button
-                size="sm"
-                variant="outline"
-                className="mr-2"
-                onClick={handleSubmitClick}
-                disabled={submitting}
-              >
-                {submitting ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Upload className="mr-2 h-4 w-4" />
-                )}
-                Entregar
-              </Button>
             )}
             <Button
               size="sm"
@@ -592,31 +553,103 @@ export default function StudentSessionPage() {
             </Button>
           </header>
 
-          {/* Instructions banner: fixed on top, collapsible */}
-          {currentInstructions && (
-            <div className="px-6 pt-4 shrink-0">
-              <div className="rounded-lg bg-blue-50 border border-blue-100 p-4">
-                <button
-                  type="button"
-                  onClick={() => setShowConsigna((v) => !v)}
-                  className="flex items-center gap-2 w-full text-left cursor-pointer"
-                >
-                  <BookOpen className="h-4 w-4 text-blue-600" />
-                  <span className="text-sm font-medium text-blue-800">Consigna</span>
-                  {showConsigna ? (
-                    <ChevronUp className="h-4 w-4 text-blue-600 ml-auto" />
-                  ) : (
-                    <ChevronDown className="h-4 w-4 text-blue-600 ml-auto" />
+          {/* Consigna + navegación de etapa: caja con colores por etapa */}
+          <div className="px-6 pt-4 shrink-0">
+            <div
+              className="rounded-xl overflow-hidden"
+              style={{ backgroundColor: theme.bg, border: `1px solid ${theme.border}` }}
+            >
+              {currentInstructions && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setShowConsigna((v) => !v)}
+                    className="flex items-center justify-between gap-4 w-full text-left cursor-pointer px-5 py-4"
+                  >
+                    <span
+                      className="text-xs font-bold uppercase tracking-wider"
+                      style={{ color: theme.color }}
+                    >
+                      Consigna
+                    </span>
+                    <span
+                      className="flex items-center gap-1 text-sm font-semibold whitespace-nowrap"
+                      style={{ color: theme.color }}
+                    >
+                      {showConsigna ? (
+                        <>Ocultar consigna <ChevronUp className="h-4 w-4" /></>
+                      ) : (
+                        <>Ver consigna <ChevronDown className="h-4 w-4" /></>
+                      )}
+                    </span>
+                  </button>
+                  {showConsigna && (
+                    <p className="px-5 pb-4 text-sm leading-relaxed text-gray-800 whitespace-pre-wrap">
+                      {currentInstructions}
+                    </p>
                   )}
-                </button>
-                {showConsigna && (
-                  <p className="mt-2 text-sm text-blue-900 whitespace-pre-wrap">
-                    {currentInstructions}
-                  </p>
-                )}
-              </div>
+                </>
+              )}
+
+              {/* Barra: indicador de etapa + estado + volver | acción principal */}
+              {(hasMultipleStages || showSubmitAction) && (
+                <div
+                  className="flex items-center justify-between gap-4 flex-wrap px-5 py-3"
+                  style={{ backgroundColor: theme.barBg, borderTop: `1px solid ${theme.border}` }}
+                >
+                  <div className="flex items-center gap-3 flex-wrap">
+                    {hasMultipleStages && (
+                      <>
+                        <span className="text-sm text-gray-500 whitespace-nowrap">
+                          Etapa {currentStageIndex + 1} de {stages!.length}
+                        </span>
+                        <span
+                          className="text-xs font-bold uppercase tracking-wide px-4 py-1.5 rounded-full"
+                          style={{ color: theme.color, backgroundColor: theme.bg }}
+                        >
+                          {theme.kind}
+                        </span>
+                        {currentStageIndex > 0 && (
+                          <button
+                            type="button"
+                            disabled={changingStage}
+                            onClick={() => handleStageChange(stages![currentStageIndex - 1].id)}
+                            className="text-sm text-gray-900 underline cursor-pointer whitespace-nowrap disabled:opacity-50"
+                          >
+                            Volver a la etapa {currentStageIndex}
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                  {showStageAction && (
+                    <Button
+                      size="sm"
+                      disabled={changingStage}
+                      onClick={() => setStageDialogOpen(true)}
+                      className="text-white border-0"
+                      style={{ backgroundColor: "#80498E" }}
+                    >
+                      {changingStage && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      Finalizar etapa
+                    </Button>
+                  )}
+                  {showSubmitAction && (
+                    <Button
+                      size="sm"
+                      disabled={submitting}
+                      onClick={handleSubmitClick}
+                      className="text-white border-0"
+                      style={{ backgroundColor: "#80498E" }}
+                    >
+                      {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      Entregar tarea
+                    </Button>
+                  )}
+                </div>
+              )}
             </div>
-          )}
+          </div>
 
           {/* Generated questions: always visible, own bounded scroll */}
           {questions.length > 0 && (

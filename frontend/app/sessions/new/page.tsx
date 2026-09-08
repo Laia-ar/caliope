@@ -17,6 +17,7 @@ import {
 import { ArrowLeft, Loader2, Plus, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { createSession, fetchMyGrades, type SessionAccessLevel, type GradeInfo } from "@/lib/sessions"
+import { stageTheme } from "@/lib/stage-colors"
 import { loadPrompts, type Prompt } from "@/lib/prompts"
 import { loadAvailableModels, type AvailableModel } from "@/lib/models-api"
 import { fetchAuthUser } from "@/lib/auth"
@@ -144,13 +145,16 @@ export default function NewSessionPage() {
 
             <div className="space-y-4">
               <Label>Etapas</Label>
-              {stages.map((stage, index) => (
+              {stages.map((stage, index) => {
+                const theme = stageTheme(index)
+                return (
                 <div
                   key={index}
-                  className="space-y-4 rounded-lg border border-gray-200 bg-white p-4"
+                  className="space-y-4 rounded-lg p-4"
+                  style={{ backgroundColor: theme.bg, border: `1px solid ${theme.border}` }}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium text-gray-700">
+                    <span className="text-sm font-medium" style={{ color: theme.color }}>
                       Etapa {index + 1}
                     </span>
                     <Button
@@ -199,7 +203,8 @@ export default function NewSessionPage() {
                     )}
                   </div>
                 </div>
-              ))}
+                )
+              })}
 
               <Button
                 type="button"
