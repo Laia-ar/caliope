@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/select"
 import { ArrowLeft, Loader2, Plus, Trash2 } from "lucide-react"
 import { toast } from "sonner"
-import { createSession, fetchMyGrades, type GradeInfo } from "@/lib/sessions"
+import { createSession, fetchMyGrades, type SessionAccessLevel, type GradeInfo } from "@/lib/sessions"
 import { stageTheme } from "@/lib/stage-colors"
 import { loadPrompts, type Prompt } from "@/lib/prompts"
 import { loadAvailableModels, type AvailableModel } from "@/lib/models-api"
@@ -32,6 +32,7 @@ export default function NewSessionPage() {
   const [title, setTitle] = useState("")
   const [stages, setStages] = useState<StageDraft[]>([{ instructions: "", promptId: "" }])
   const [model, setModel] = useState<string>("")
+  const [accessLevel, setAccessLevel] = useState<SessionAccessLevel>("registered")
   const [gradeId, setGradeId] = useState<string>("")
   const [grades, setGrades] = useState<GradeInfo[]>([])
   const [models, setModels] = useState<AvailableModel[]>([])
@@ -96,7 +97,7 @@ export default function NewSessionPage() {
         title: title.trim(),
         instructions: stages[0].instructions.trim(),
         llm_model_name: model,
-        access_level: "registered",
+        access_level: accessLevel,
         grade_id: gradeId && gradeId !== "none" ? Number(gradeId) : null,
         stages: stages.map((s) => ({
           instructions: s.instructions.trim(),
@@ -237,8 +238,18 @@ export default function NewSessionPage() {
 
             <div className="space-y-2">
               <Label>Acceso permitido</Label>
+              <Select value={accessLevel} onValueChange={(value) => setAccessLevel(value as SessionAccessLevel)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Seleccionar acceso" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="registered">Solo usuarios registrados</SelectItem>
+                  <SelectItem value="guests">Solo invitados</SelectItem>
+                  <SelectItem value="both">Ambos</SelectItem>
+                </SelectContent>
+              </Select>
               <p className="text-xs text-gray-500">
-                Los estudiantes deberán iniciar sesión con su cuenta para ingresar a la tarea.
+                Definí quién puede ingresar a la tarea con el código.
               </p>
             </div>
 
