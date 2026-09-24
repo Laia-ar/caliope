@@ -71,6 +71,19 @@ export interface SubmissionInfo {
   submission_url: string | null
 }
 
+export interface SessionParticipantItem {
+  id: number
+  name: string
+  current_stage_id: number | null
+  stage_position: number | null
+  current_text: string
+  text_updated_at: string | null
+  joined_at: string | null
+  submitted_at: string | null
+  submission_url: string | null
+  last_activity_at: string | null
+}
+
 export interface ParticipantMonitoringInfo {
   participant_id: number
   participant_name: string
@@ -174,6 +187,26 @@ export async function getSessionQueries(id: number): Promise<SessionQueryItem[]>
   const result = await apiCall(`/api/sessions/${id}/queries`)
   const data = result && typeof result === "object" ? (result as Record<string, unknown>) : {}
   return Array.isArray(data.queries) ? (data.queries as SessionQueryItem[]) : []
+}
+
+export async function getSessionParticipants(id: number): Promise<SessionParticipantItem[]> {
+  const result = await apiCall(`/api/sessions/${id}/participants`)
+  const data = result && typeof result === "object" ? (result as Record<string, unknown>) : {}
+  return Array.isArray(data.participants) ? (data.participants as SessionParticipantItem[]) : []
+}
+
+export async function syncParticipantText(
+  sessionId: number,
+  token: string,
+  text: string
+): Promise<void> {
+  await apiCall(`/api/sessions/${sessionId}/participant/text`, {
+    method: "POST",
+    headers: {
+      "X-Participant-Token": token,
+    },
+    body: JSON.stringify({ text }),
+  })
 }
 
 export async function joinSession(code: string, displayName?: string): Promise<{ session: Session; participant_token: string; participant: ParticipantInfo }> {

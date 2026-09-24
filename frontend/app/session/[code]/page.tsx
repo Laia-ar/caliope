@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useState, useCallback, useRef } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -23,6 +23,7 @@ import {
   getParticipantMe,
   setParticipantStage,
   submitSessionWork,
+  syncParticipantText,
   getParticipantQueries,
   type Session,
   type ParticipantInfo,
@@ -164,6 +165,30 @@ export default function StudentSessionPage() {
     }, 1000)
     return () => clearTimeout(timeout)
   }, [editorContent, code])
+
+  // Sync the draft to the backend (throttled) so the teacher can follow along
+  const lastSyncedTextRef = useRef<string | null>(null)
+  const lastSyncAtRef = useRef(0)
+  useEffect(() => {
+    if (!token || !session) return
+    if (editorContent === lastSyncedTextRef.current) return
+    const sync = () => {
+      const textToSync = editorContent
+      lastSyncAtRef.current = Date.now()
+      syncParticipantText(session.id, token, textToSync)
+        .then(() => {
+          lastSyncedTextRef.current = textToSync
+        })
+        .catch((err) => console.error("Error syncing draft", err))
+    }
+    const elapsed = Date.now() - lastSyncAtRef.current
+    if (elapsed >= 5000) {
+      sync()
+      return
+    }
+    const timeout = setTimeout(sync, 5000 - elapsed)
+    return () => clearTimeout(timeout)
+  }, [editorContent, token, session])
 
   const handleJoin = async (e?: React.FormEvent) => {
     e?.preventDefault()
@@ -709,8 +734,7 @@ export default function StudentSessionPage() {
         title="Vas a entregar tu trabajo en Classroom"
         description="Tu texto será entregado a tu docente en Classroom y ya no vas a poder seguir escribiendo en Calíope."
         items={[
-          "Mi texto está terminado",
-          "Revisé que diga lo que quiero decir",
+          "Revisé mi texto y está terminado",
         ]}
         confirmLabel="Entregar"
         cancelLabel="Seguir trabajando"

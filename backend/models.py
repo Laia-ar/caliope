@@ -163,6 +163,8 @@ class SessionParticipant(db.Model):
     display_name = db.Column(db.String(100), nullable=True)
     token = db.Column(db.String(36), unique=True, nullable=False)
     current_stage_id = db.Column(db.Integer, db.ForeignKey('session_stages.id'), nullable=True)
+    current_text = db.Column(db.Text, nullable=False, default='')
+    text_updated_at = db.Column(db.DateTime, nullable=True)
     submitted_at = db.Column(db.DateTime, nullable=True)
     submission_url = db.Column(db.String(512), nullable=True)
     joined_at = db.Column(db.DateTime, default=datetime.utcnow)

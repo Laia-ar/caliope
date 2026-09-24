@@ -11,9 +11,11 @@ import { toast } from "sonner"
 import {
   getSession,
   getSessionQueries,
+  getSessionParticipants,
   updateSession,
   type Session,
   type SessionQueryItem,
+  type SessionParticipantItem,
 } from "@/lib/sessions"
 import { loadPrompts, type Prompt } from "@/lib/prompts"
 import {
@@ -90,6 +92,9 @@ export default function SessionDetailPage() {
   const [linkDescription, setLinkDescription] = useState("")
   const [linking, setLinking] = useState(false)
 
+  const [selectedParticipantId, setSelectedParticipantId] = useState<number | null>(null)
+  const [liveParticipants, setLiveParticipants] = useState<SessionParticipantItem[]>([])
+
   const loadSession = useCallback(async () => {
     if (!sessionId || isNaN(sessionId)) return
     try {
@@ -126,6 +131,26 @@ export default function SessionDetailPage() {
     const interval = setInterval(loadQueries, 2000)
     return () => clearInterval(interval)
   }, [session, loadQueries])
+
+  // While a student dialog is open, poll their live text
+  useEffect(() => {
+    if (selectedParticipantId == null || !sessionId || isNaN(sessionId)) return
+    let cancelled = false
+    const loadParticipants = async () => {
+      try {
+        const data = await getSessionParticipants(sessionId)
+        if (!cancelled) setLiveParticipants(data)
+      } catch (err) {
+        console.error("Error loading participants", err)
+      }
+    }
+    loadParticipants()
+    const interval = setInterval(loadParticipants, 3000)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [selectedParticipantId, sessionId])
 
   const publicJoinUrl = typeof window !== "undefined" && session
     ? `${window.location.origin}/session/${session.access_code}`
@@ -348,6 +373,18 @@ export default function SessionDetailPage() {
     )
   }
 
+  const selectedMonitoring = selectedParticipantId != null
+    ? session.participants?.find((p) => p.participant_id === selectedParticipantId) ?? null
+    : null
+  const selectedLive = selectedParticipantId != null
+    ? liveParticipants.find((p) => p.id === selectedParticipantId) ?? null
+    : null
+  const selectedStagePosition = selectedLive?.stage_position ?? selectedMonitoring?.stage_position ?? null
+  const selectedSubmittedAt = selectedLive?.submitted_at ?? selectedMonitoring?.submitted_at ?? null
+  const selectedQueries = selectedParticipantId != null
+    ? queries.filter((q) => q.participant_id === selectedParticipantId)
+    : []
+
   return (
     <AppLayout>
       <div className="flex-1 overflow-y-auto bg-gray-50">
@@ -494,9 +531,11 @@ export default function SessionDetailPage() {
                               ? `Etapa ${p.stage_position} de ${session.stages.length}`
                               : null
                           return (
-                            <div
+                            <button
                               key={p.participant_id}
-                              className="flex items-center justify-between gap-3 rounded-md border border-gray-100 px-3 py-2 text-sm"
+                              type="button"
+                              onClick={() => setSelectedParticipantId(p.participant_id)}
+                              className="flex w-full items-center justify-between gap-3 rounded-md border border-gray-100 px-3 py-2 text-left text-sm transition-colors hover:border-gray-300 hover:bg-gray-50"
                             >
                               <span className="text-gray-700">{p.participant_name}</span>
                               <div className="flex items-center gap-3">
@@ -510,7 +549,7 @@ export default function SessionDetailPage() {
                                   {statusTheme.label}
                                 </span>
                               </div>
-                            </div>
+                            </button>
                           )
                         })}
                       </div>
@@ -950,6 +989,76 @@ export default function SessionDetailPage() {
               Vincular
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={selectedParticipantId != null}
+        onOpenChange={(open) => {
+          if (!open) setSelectedParticipantId(null)
+        }}
+      >
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex flex-wrap items-center gap-2">
+              {selectedLive?.name ?? selectedMonitoring?.participant_name ?? "Alumno"}
+              {selectedStagePosition != null && (
+                <Badge variant="outline" className="text-xs">
+                  Etapa {selectedStagePosition}
+                </Badge>
+              )}
+              {selectedSubmittedAt && (
+                <Badge variant="outline" className="border-green-200 bg-green-50 text-xs text-green-700">
+                  Entregado
+                </Badge>
+              )}
+            </DialogTitle>
+            {selectedLive?.text_updated_at && (
+              <DialogDescription>
+                Última actualización: {new Date(selectedLive.text_updated_at).toLocaleTimeString()}
+              </DialogDescription>
+            )}
+          </DialogHeader>
+
+          {selectedLive && selectedLive.current_text.trim() ? (
+            <div
+              className="rounded-lg border border-gray-100 bg-white p-4 text-sm text-gray-900 prose prose-sm max-w-none"
+              dangerouslySetInnerHTML={{ __html: renderHtmlContent(selectedLive.current_text) }}
+            />
+          ) : (
+            <p className="text-sm text-gray-500">Todavía no escribió nada.</p>
+          )}
+
+          <details className="mt-2 rounded-md bg-gray-50 p-3">
+            <summary className="cursor-pointer text-xs font-medium text-gray-600 hover:text-gray-900">
+              Ver historial ({selectedQueries.length} interacción{selectedQueries.length === 1 ? "" : "es"})
+            </summary>
+            {selectedQueries.length === 0 ? (
+              <p className="mt-3 text-sm text-gray-500">Todavía no hizo preguntas.</p>
+            ) : (
+              <div className="mt-3 space-y-3 border-l-2 border-gray-200 pl-3">
+                {selectedQueries.map((q) => (
+                  <div key={q.id} className="text-sm">
+                    <div className="text-xs text-gray-400">
+                      {new Date(q.created_at).toLocaleTimeString()}
+                      {q.stage_position != null && (
+                        <Badge variant="outline" className="ml-2 text-xs">
+                          Etapa {q.stage_position}
+                        </Badge>
+                      )}
+                    </div>
+                    <div
+                      className="mt-1 font-medium text-gray-900 prose prose-sm max-w-none"
+                      dangerouslySetInnerHTML={{ __html: renderHtmlContent(q.query_text) }}
+                    />
+                    <div
+                      className="mt-1 rounded bg-white p-2 text-gray-700 prose prose-sm max-w-none"
+                      dangerouslySetInnerHTML={{ __html: renderHtmlContent(q.response_text) }}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+          </details>
         </DialogContent>
       </Dialog>
     </AppLayout>

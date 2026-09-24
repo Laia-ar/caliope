@@ -1948,6 +1948,58 @@ def set_participant_stage(session_id):
     db.session.commit()
     return jsonify({'id': participant.id, 'current_stage_id': participant.current_stage_id})
 
+@app.route('/api/sessions/<int:session_id>/participant/text', methods=['POST'])
+def sync_participant_text(session_id):
+    token = request.headers.get('X-Participant-Token', '')
+    participant = SessionParticipant.query.filter_by(token=token, session_id=session_id).first() if token else None
+    if not participant:
+        return jsonify({'error': 'Invalid participant token'}), 401
+    data = request.get_json() or {}
+    text = data.get('text')
+    if text is None:
+        return jsonify({'error': 'text is required'}), 400
+    participant.current_text = text
+    participant.text_updated_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify({'ok': True, 'text_updated_at': participant.text_updated_at.isoformat()})
+
+@app.route('/api/sessions/<int:session_id>/participants', methods=['GET'])
+@login_required
+def list_session_participants(session_id):
+    error = require_teacher()
+    if error:
+        return error
+    s = ClassroomSession.query.filter_by(id=session_id, teacher_id=current_user.id).first_or_404()
+    stage_positions = {stage.id: stage.position for stage in s.stages}
+    last_query_at = {}
+    for query in SessionQuery.query.filter_by(session_id=session_id).all():
+        if query.participant_id is None:
+            continue
+        current = last_query_at.get(query.participant_id)
+        if current is None or query.created_at > current:
+            last_query_at[query.participant_id] = query.created_at
+    participants = []
+    for p in s.participants:
+        name = p.display_name
+        if not name and p.user:
+            name = p.user.name
+        activity_candidates = [p.joined_at, p.text_updated_at, last_query_at.get(p.id)]
+        last_activity = max((dt for dt in activity_candidates if dt is not None), default=None)
+        participants.append({
+            'id': p.id,
+            'name': name or 'Anónimo',
+            'current_stage_id': p.current_stage_id,
+            'stage_position': stage_positions.get(p.current_stage_id),
+            'current_text': p.current_text,
+            'text_updated_at': p.text_updated_at.isoformat() if p.text_updated_at else None,
+            'joined_at': p.joined_at.isoformat() if p.joined_at else None,
+            'submitted_at': p.submitted_at.isoformat() if p.submitted_at else None,
+            'submission_url': p.submission_url,
+            'last_activity_at': last_activity.isoformat() if last_activity else None,
+        })
+    participants.sort(key=lambda p: p['name'].lower())
+    return jsonify({'participants': participants})
+
 @app.route('/api/sessions/<int:session_id>/participant/queries', methods=['GET'])
 def get_participant_queries(session_id):
     token = request.headers.get('X-Participant-Token', '')
