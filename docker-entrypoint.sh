@@ -21,6 +21,10 @@ cd /app/backend
 echo "[Entrypoint] Initializing database..."
 /app/.venv/bin/python -c "from app import app; from models import init_db; app.app_context().push(); init_db()"
 
+# Run idempotent migrations (safe to run on every deploy)
+echo "[Entrypoint] Running migrations..."
+/app/.venv/bin/python migrations/run_migrations.py
+
 # Start backend with Gunicorn + gevent workers
 # -k gevent          : async workers that handle many concurrent I/O waits
 # -w 2               : 2 workers (safe for 1 vCPU + 2GB RAM)
