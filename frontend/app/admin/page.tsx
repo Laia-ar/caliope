@@ -192,6 +192,22 @@ export default function AdminPage() {
     setEditingUser(null)
   }
 
+  const handleToggleAdmin = async (user: AdminUser) => {
+    try {
+      await updateUserFeatures(user.id, { is_admin: !user.is_admin })
+      setUsers((prev) =>
+        prev.map((u) => (u.id === user.id ? { ...u, is_admin: !user.is_admin } : u))
+      )
+      toast.success(
+        !user.is_admin
+          ? `${user.username} ahora es administrador`
+          : `${user.username} ya no es administrador`
+      )
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "No se pudo actualizar el rol")
+    }
+  }
+
   const handleToggleInvites = async (user: AdminUser) => {
     try {
       await updateUserFeatures(user.id, { can_create_invites: !user.can_create_invites })
@@ -343,7 +359,23 @@ export default function AdminPage() {
                       <td className="px-4 py-3 font-medium text-gray-900">{user.username}</td>
                       <td className="px-4 py-3 text-gray-600">{user.email || "—"}</td>
                       <td className="px-4 py-3 text-gray-600">{user.name || "—"}</td>
-                      <td className="px-4 py-3 text-gray-600">{user.is_admin ? "Admin" : "Usuario"}</td>
+                      <td className="px-4 py-3">
+                        <Button
+                          variant={user.is_admin ? "default" : "outline"}
+                          size="sm"
+                          disabled={user.username?.toLowerCase() === "admin"}
+                          title={
+                            user.username?.toLowerCase() === "admin"
+                              ? "El admin del entorno no se puede degradar"
+                              : user.is_admin
+                                ? "Quitar rol de administrador"
+                                : "Hacer administrador"
+                          }
+                          onClick={() => handleToggleAdmin(user)}
+                        >
+                          {user.is_admin ? "Admin" : "Usuario"}
+                        </Button>
+                      </td>
                       <td className="px-4 py-3 text-gray-600">
                         {user.trial_expires_at ? (
                           new Date(user.trial_expires_at) < new Date() ? (

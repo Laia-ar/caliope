@@ -26,11 +26,24 @@ from urllib.parse import urljoin, urlparse
 ADMIN_USERNAME = os.getenv('ADMIN_USERNAME', 'admin')
 ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD')
 
-def is_admin_user(username: str) -> bool:
-    """Check if the given username is the admin user."""
-    if not username:
-        return False
-    return username.lower() == ADMIN_USERNAME.lower()
+def is_admin_user(user_or_username=None) -> bool:
+    """Check if the given user/username is an admin (env admin or DB flag)."""
+    if isinstance(user_or_username, User):
+        user = user_or_username
+        if user.is_admin:
+            return True
+        username = user.username
+    else:
+        username = user_or_username
+        user = None
+
+    if username and username.lower() == ADMIN_USERNAME.lower():
+        return True
+
+    if user is None and username:
+        user = User.query.filter(db.func.lower(User.username) == username.lower()).first()
+
+    return bool(user and user.is_admin)
 
 def load_users_from_json():
     """Load users from users.json if it exists, otherwise return empty list."""
@@ -455,7 +468,8 @@ def check_auth():
             'username': user.username,
             'email': user.email,
             'name': user.name,
-            'can_create_invites': bool(user.can_create_invites)
+            'can_create_invites': bool(user.can_create_invites),
+            'is_admin': is_admin_user(user)
         })
     else:
         return jsonify({'message': 'Not authenticated'}), 401
@@ -529,7 +543,7 @@ def local_login():
             return jsonify({'error': 'Invalid credentials'}), 401
 
     # Trial / disabled checks (never apply to the env admin)
-    if not is_admin_user(user.username):
+    if not is_admin_user(user):
         if user.is_disabled:
             return jsonify({'error': 'Cuenta deshabilitada. Escribinos a hola@laia.ar para seguir probando y charlando. :)'}), 403
         if user.trial_expires_at and datetime.utcnow() > user.trial_expires_at:
@@ -547,13 +561,13 @@ def local_login():
         'email': user.email,
         'name': user.name,
         'can_create_invites': bool(user.can_create_invites),
-        'is_admin': is_admin_user(username)
+        'is_admin': is_admin_user(user)
     })
 
 @app.route('/api/admin/dashboard', methods=['GET'])
 @login_required
 def admin_dashboard():
-    if not is_admin_user(current_user.username):
+    if not is_admin_user(current_user):
         return jsonify({'error': 'Admin access required'}), 403
     
     # Get detailed stats
@@ -576,7 +590,7 @@ def admin_dashboard():
 @app.route('/api/admin/users', methods=['GET'])
 @login_required
 def admin_users():
-    if not is_admin_user(current_user.username):
+    if not is_admin_user(current_user):
         return jsonify({'error': 'Admin access required'}), 403
     
     users = User.query.all()
@@ -586,7 +600,7 @@ def admin_users():
             'username': user.username,
             'email': user.email,
             'name': user.name,
-            'is_admin': is_admin_user(user.username),
+            'is_admin': is_admin_user(user),
             'can_create_invites': bool(user.can_create_invites),
             'is_disabled': bool(user.is_disabled),
             'trial_expires_at': user.trial_expires_at.isoformat() if user.trial_expires_at else None
@@ -596,7 +610,7 @@ def admin_users():
 @app.route('/api/admin/users/<int:user_id>/features', methods=['POST'])
 @login_required
 def admin_update_user_features(user_id):
-    if not is_admin_user(current_user.username):
+    if not is_admin_user(current_user):
         return jsonify({'error': 'Admin access required'}), 403
 
     user = User.query.get_or_404(user_id)
@@ -607,6 +621,9 @@ def admin_update_user_features(user_id):
 
     if 'is_disabled' in data:
         user.is_disabled = bool(data['is_disabled'])
+
+    if 'is_admin' in data:
+        user.is_admin = bool(data['is_admin'])
 
     if 'trial_extension_days' in data:
         try:
@@ -624,6 +641,7 @@ def admin_update_user_features(user_id):
         'id': user.id,
         'username': user.username,
         'can_create_invites': bool(user.can_create_invites),
+        'is_admin': bool(user.is_admin),
         'is_disabled': bool(user.is_disabled),
         'trial_expires_at': user.trial_expires_at.isoformat() if user.trial_expires_at else None
     })
@@ -631,7 +649,7 @@ def admin_update_user_features(user_id):
 @app.route('/api/admin/users/rawjson', methods=['GET'])
 @login_required
 def get_raw_users_json():
-    if not is_admin_user(current_user.username):
+    if not is_admin_user(current_user):
         return jsonify({'error': 'Admin access required'}), 403
     
     try:
@@ -645,7 +663,7 @@ def get_raw_users_json():
 @app.route('/api/admin/users/rawjson', methods=['PUT'])
 @login_required
 def update_raw_users_json():
-    if not is_admin_user(current_user.username):
+    if not is_admin_user(current_user):
         return jsonify({'error': 'Admin access required'}), 403
     
     try:
@@ -666,7 +684,7 @@ def update_raw_users_json():
 @app.route('/api/admin/download-db', methods=['GET'])
 @login_required
 def download_db():
-    if not is_admin_user(current_user.username):
+    if not is_admin_user(current_user):
         return jsonify({'error': 'Admin access required'}), 403
     
     db_path = os.path.join(app.instance_path, 'app.db')
@@ -681,7 +699,7 @@ def download_db():
 @login_required
 def upload_db():
     """Upload and replace the SQLite database."""
-    if not is_admin_user(current_user.username):
+    if not is_admin_user(current_user):
         return jsonify({'error': 'Admin access required'}), 403
     
     if 'file' not in request.files:
@@ -1206,7 +1224,7 @@ def _validate_invitation_code(raw_code):
 @app.route('/api/admin/invitation-codes', methods=['GET'])
 @login_required
 def admin_get_invitation_codes():
-    if not is_admin_user(current_user.username):
+    if not is_admin_user(current_user):
         return jsonify({'error': 'Admin access required'}), 403
 
     codes = InvitationCode.query.order_by(InvitationCode.created_at.desc()).all()
@@ -1227,7 +1245,7 @@ def admin_get_invitation_codes():
 @app.route('/api/admin/invitation-codes', methods=['POST'])
 @login_required
 def admin_create_invitation_code():
-    if not is_admin_user(current_user.username):
+    if not is_admin_user(current_user):
         return jsonify({'error': 'Admin access required'}), 403
 
     data = request.get_json() or {}
@@ -1291,7 +1309,7 @@ def admin_create_invitation_code():
 @app.route('/api/admin/invitation-codes/<int:code_id>/toggle', methods=['POST'])
 @login_required
 def admin_toggle_invitation_code(code_id):
-    if not is_admin_user(current_user.username):
+    if not is_admin_user(current_user):
         return jsonify({'error': 'Admin access required'}), 403
 
     code = InvitationCode.query.get_or_404(code_id)

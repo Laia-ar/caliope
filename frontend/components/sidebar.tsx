@@ -39,7 +39,7 @@ export function Sidebar({ isCollapsed = false, onToggle }: SidebarProps) {
 
         const data = await response.json().catch(() => null)
         if (!cancelled && data && typeof data.username === "string") {
-          setIsAdminUser(data.username.toLowerCase() === "admin")
+          setIsAdminUser(data.is_admin === true || data.username.toLowerCase() === "admin")
           setCanCreateInvites(data.can_create_invites === true)
         }
       } catch (error) {

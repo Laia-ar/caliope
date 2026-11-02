@@ -147,7 +147,7 @@ export async function updateUsersRawJson(rawContent: string): Promise<void> {
 
 export async function updateUserFeatures(
   userId: number,
-  features: { can_create_invites?: boolean; is_disabled?: boolean; trial_extension_days?: number },
+  features: { can_create_invites?: boolean; is_admin?: boolean; is_disabled?: boolean; trial_extension_days?: number },
 ): Promise<void> {
   await adminFetch(`/api/admin/users/${userId}/features`, {
     method: "POST",
