@@ -14,9 +14,11 @@ import {
   fetchAdminUsers,
   fetchUsersRawJson,
   updateUsersRawJson,
+  updateUserFeatures,
   type AdminStats,
   type AdminUser,
 } from "@/lib/admin"
+import { AdminInvitationCodesSection } from "@/components/admin-invitation-codes-section"
 import { buildBackendUrl } from "@/lib/backend"
 
 interface EditableUser extends AdminUser {
@@ -190,6 +192,33 @@ export default function AdminPage() {
     setEditingUser(null)
   }
 
+  const handleToggleInvites = async (user: AdminUser) => {
+    try {
+      await updateUserFeatures(user.id, { can_create_invites: !user.can_create_invites })
+      setUsers((prev) =>
+        prev.map((u) => (u.id === user.id ? { ...u, can_create_invites: !user.can_create_invites } : u))
+      )
+      toast.success(
+        !user.can_create_invites
+          ? `${user.username} ahora puede crear invitaciones`
+          : `${user.username} ya no puede crear invitaciones`
+      )
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "No se pudo actualizar el permiso")
+    }
+  }
+
+  const handleRenewTrial = async (user: AdminUser) => {
+    try {
+      await updateUserFeatures(user.id, { trial_extension_days: 15 })
+      toast.success(`Prueba de ${user.username} renovada por 15 días`)
+      const usersResponse = await fetchAdminUsers()
+      setUsers(usersResponse)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "No se pudo renovar la prueba")
+    }
+  }
+
   const renderContent = () => {
     if (loading) {
       return (
@@ -296,13 +325,15 @@ export default function AdminPage() {
                   <th className="px-4 py-3 text-left font-medium text-gray-600">Email</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-600">Nombre</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-600">Rol</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-600">Prueba</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-600">Puede invitar</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-600">Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 bg-white">
                 {users.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-gray-500">
+                    <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
                       No hay usuarios para mostrar.
                     </td>
                   </tr>
@@ -313,6 +344,30 @@ export default function AdminPage() {
                       <td className="px-4 py-3 text-gray-600">{user.email || "—"}</td>
                       <td className="px-4 py-3 text-gray-600">{user.name || "—"}</td>
                       <td className="px-4 py-3 text-gray-600">{user.is_admin ? "Admin" : "Usuario"}</td>
+                      <td className="px-4 py-3 text-gray-600">
+                        {user.trial_expires_at ? (
+                          new Date(user.trial_expires_at) < new Date() ? (
+                            <span className="inline-flex items-center rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">
+                              Vencida
+                            </span>
+                          ) : (
+                            <span className="text-xs">
+                              hasta {new Date(user.trial_expires_at).toLocaleDateString("es-AR")}
+                            </span>
+                          )
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <Button
+                          variant={user.can_create_invites ? "default" : "outline"}
+                          size="sm"
+                          onClick={() => handleToggleInvites(user)}
+                        >
+                          {user.can_create_invites ? "Sí" : "No"}
+                        </Button>
+                      </td>
                       <td className="px-4 py-3">
                         <div className="flex flex-wrap items-center gap-2">
                           <Button
@@ -323,6 +378,16 @@ export default function AdminPage() {
                             <Edit3 className="h-4 w-4" />
                             Editar
                           </Button>
+                          {user.trial_expires_at && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              title="Renovar la prueba por 15 días"
+                              onClick={() => handleRenewTrial(user)}
+                            >
+                              Renovar 15d
+                            </Button>
+                          )}
                           <Button variant="secondary" size="sm" disabled title="Próximamente">
                             Eliminar
                           </Button>
@@ -335,6 +400,8 @@ export default function AdminPage() {
             </table>
           </div>
         </section>
+
+        <AdminInvitationCodesSection />
       </div>
     )
   }

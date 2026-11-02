@@ -28,6 +28,9 @@ export default function LoginPage() {
   const [password, setPassword] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState("")
+  const [showCodeInput, setShowCodeInput] = useState(false)
+  const [inviteCode, setInviteCode] = useState("")
+  const [isCheckingCode, setIsCheckingCode] = useState(false)
 
   const resolveRedirectTarget = () => getRedirectTarget()
 
@@ -92,6 +95,31 @@ export default function LoginPage() {
       setError("Error al iniciar sesión")
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  const handleCodeSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const code = inviteCode.trim()
+    if (!code || isCheckingCode) return
+
+    setIsCheckingCode(true)
+    setError("")
+
+    try {
+      const response = await fetch(`/api/invitation-codes/${encodeURIComponent(code)}`)
+      const data = await response.json().catch(() => ({}))
+
+      if (!response.ok) {
+        setError(typeof data?.error === "string" ? data.error : "Código inválido")
+        return
+      }
+
+      router.push(`/join/${encodeURIComponent(code)}`)
+    } catch {
+      setError("No se pudo validar el código")
+    } finally {
+      setIsCheckingCode(false)
     }
   }
 
@@ -183,11 +211,36 @@ export default function LoginPage() {
           </Button>
         </form>
 
-        {/* Sign Up Link */}
+        {/* Invitation Code */}
         <div className="text-center mt-6">
-          <button type="button" className="text-sm text-gray-600 hover:text-gray-900 underline">
-            Conseguí un usuario
-          </button>
+          {showCodeInput ? (
+            <form onSubmit={handleCodeSubmit} className="space-y-3">
+              <Input
+                type="text"
+                placeholder="palabra-palabra-palabra-palabra"
+                value={inviteCode}
+                onChange={(e) => setInviteCode(e.target.value)}
+                className="w-full py-3 px-4 border border-gray-300 rounded-lg text-center focus:ring-2 focus:ring-[#1862A2] focus:border-transparent"
+                autoFocus
+              />
+              <Button
+                type="submit"
+                disabled={isCheckingCode || !inviteCode.trim()}
+                variant="primary"
+                className="w-full py-3 rounded-lg font-medium"
+              >
+                {isCheckingCode ? "Validando..." : "Usar código"}
+              </Button>
+            </form>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowCodeInput(true)}
+              className="text-sm text-gray-600 hover:text-gray-900 underline"
+            >
+              Tengo un código de invitación
+            </button>
+          )}
         </div>
       </div>
     </div>

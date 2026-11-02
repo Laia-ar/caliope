@@ -16,6 +16,9 @@ export interface AdminUser {
   email: string
   name: string
   is_admin: boolean
+  can_create_invites: boolean
+  is_disabled: boolean
+  trial_expires_at: string | null
 }
 
 function coerceRecord(value: unknown): Record<string, unknown> {
@@ -55,6 +58,9 @@ function normalizeUser(raw: unknown): AdminUser {
       typeof data.is_admin === "boolean"
         ? data.is_admin
         : typeof data.username === "string" && data.username.toLowerCase() === "admin",
+    can_create_invites: data.can_create_invites === true,
+    is_disabled: data.is_disabled === true,
+    trial_expires_at: typeof data.trial_expires_at === "string" ? data.trial_expires_at : null,
   }
 }
 
@@ -137,4 +143,14 @@ export async function updateUsersRawJson(rawContent: string): Promise<void> {
       },
     },
   )
+}
+
+export async function updateUserFeatures(
+  userId: number,
+  features: { can_create_invites?: boolean; is_disabled?: boolean; trial_extension_days?: number },
+): Promise<void> {
+  await adminFetch(`/api/admin/users/${userId}/features`, {
+    method: "POST",
+    body: JSON.stringify(features),
+  })
 }

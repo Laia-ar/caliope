@@ -5,14 +5,20 @@ from werkzeug.utils import secure_filename
 from werkzeug.middleware.proxy_fix import ProxyFix
 import os
 import json
+import re
+import secrets
 import shutil
+import threading
+import time
+import unicodedata
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from dotenv import load_dotenv
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from extensions import db
-from models import init_db, User, Document, CustomPrompt
+from models import init_db, User, Document, CustomPrompt, InvitationLink, InvitationCode, InvitationCodeUse
 from authlib.integrations.flask_client import OAuth
 from urllib.parse import urljoin, urlparse
 
@@ -46,6 +52,59 @@ def get_admin_user():
         }
     return None
 
+# --- Invitations helpers (Argentina time, word-based codes, rate limiting) ---
+
+AR_TZ = timezone(timedelta(hours=-3))  # Argentina has no DST
+
+def _today_ar():
+    return datetime.now(timezone.utc).astimezone(AR_TZ).date()
+
+def _start_of_day_ar_utc(d):
+    """Naive UTC datetime of 00:00 ART on date d (== 24:00 ART of d-1)."""
+    return datetime(d.year, d.month, d.day, tzinfo=AR_TZ).astimezone(timezone.utc).replace(tzinfo=None)
+
+def _trial_expiry_utc(duration_days):
+    """Trial valid through the last day inclusive: 24:00 ART of (today + duration - 1)."""
+    return _start_of_day_ar_utc(_today_ar() + timedelta(days=duration_days))
+
+def _normalize_code(text):
+    """Lowercase, strip accents, spaces to dashes: typing-tolerant code matching."""
+    text = unicodedata.normalize('NFKD', (text or '').strip().lower())
+    text = ''.join(c for c in text if not unicodedata.combining(c))
+    return re.sub(r'\s+', '-', text)
+
+_WORDS = None
+
+def _load_words():
+    global _WORDS
+    if _WORDS is None:
+        path = Path(__file__).parent / 'utils' / 'diccionario.json'
+        with open(path, encoding='utf-8') as f:
+            data = json.load(f)
+        words = [w for group in data.values() for w in group]
+        _WORDS = sorted({_normalize_code(w) for w in words if w and str(w).strip()})
+    return _WORDS
+
+def _generate_invitation_code():
+    words = _load_words()
+    return '-'.join(secrets.SystemRandom().sample(words, 4))
+
+_RATE_LIMIT_WINDOW_SECONDS = 60
+_RATE_LIMIT_MAX_ATTEMPTS = 10
+_rate_limit_hits = {}
+_rate_limit_lock = threading.Lock()
+
+def _is_rate_limited(key):
+    now = time.time()
+    with _rate_limit_lock:
+        hits = [t for t in _rate_limit_hits.get(key, []) if now - t < _RATE_LIMIT_WINDOW_SECONDS]
+        if len(hits) >= _RATE_LIMIT_MAX_ATTEMPTS:
+            _rate_limit_hits[key] = hits
+            return True
+        hits.append(now)
+        _rate_limit_hits[key] = hits
+        return False
+
 # Load environment variables from .env file in project root
 env_path = Path(__file__).resolve().parent.parent / '.env'
 load_dotenv(env_path)
@@ -56,7 +115,7 @@ logging.debug(f"Loading .env from: {env_path}")
 app = Flask(__name__, static_folder='../frontend/public')
 # Trust reverse proxy headers (X-Forwarded-Proto, X-Forwarded-For)
 # Required when running behind Caddy/Nginx with SSL termination
-app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1, x_for=1)
 instance_path_env = os.getenv("FLASK_INSTANCE_PATH")
 if instance_path_env:
     app.instance_path = instance_path_env
@@ -395,7 +454,8 @@ def check_auth():
             'id': user.id,
             'username': user.username,
             'email': user.email,
-            'name': user.name
+            'name': user.name,
+            'can_create_invites': bool(user.can_create_invites)
         })
     else:
         return jsonify({'message': 'Not authenticated'}), 401
@@ -410,7 +470,8 @@ def local_login():
         return jsonify({'error': 'Username and password required'}), 400
     
     user_data = None
-    
+    user = None
+
     # First: Check environment variable credentials
     if username == ADMIN_USERNAME and ADMIN_PASSWORD and password == ADMIN_PASSWORD:
         user_data = {
@@ -420,45 +481,60 @@ def local_login():
             'name': 'Administrator',
             'is_disabled': False
         }
-    
+
     # Second: Check users.json file (if exists)
     if not user_data:
         static_users = load_users_from_json()
         user_data = next((u for u in static_users if u['username'] == username), None)
-    
-    # Validate credentials
-    if not user_data or user_data['password'] != password:
-        return jsonify({'error': 'Invalid credentials'}), 401
-    
-    # Check if account is disabled
-    if user_data.get('is_disabled', False):
-        return jsonify({'error': 'Cuenta deshabilitada. Escribinos a hola@laia.ar para seguir probando y charlando. :)'}), 403
-    
-    # Find or create user in database
-    user = User.query.filter(
-        (User.username == user_data['username']) | (User.email == user_data['email'])
-    ).first()
-    
-    if user:
-        # Update existing user credentials
-        user.name = user_data['name']
-        user.set_password(user_data['password'])
-        db.session.commit()
-    else:
-        try:
-            user = User(
-                username=user_data['username'],
-                email=user_data['email'],
-                name=user_data['name']
-            )
+
+    if user_data:
+        # Validate credentials
+        if user_data['password'] != password:
+            return jsonify({'error': 'Invalid credentials'}), 401
+
+        # Check if account is disabled
+        if user_data.get('is_disabled', False):
+            return jsonify({'error': 'Cuenta deshabilitada. Escribinos a hola@laia.ar para seguir probando y charlando. :)'}), 403
+
+        # Find or create user in database
+        user = User.query.filter(
+            (User.username == user_data['username']) | (User.email == user_data['email'])
+        ).first()
+
+        if user:
+            # Update existing user credentials
+            user.name = user_data['name']
             user.set_password(user_data['password'])
-            db.session.add(user)
             db.session.commit()
-        except IntegrityError:
-            db.session.rollback()
-            app.logger.error(f"[Login] IntegrityError creating user {user_data['username']}")
-            return jsonify({'error': 'User conflict. Please contact support.'}), 500
-    
+        else:
+            try:
+                user = User(
+                    username=user_data['username'],
+                    email=user_data['email'],
+                    name=user_data['name']
+                )
+                user.set_password(user_data['password'])
+                db.session.add(user)
+                db.session.commit()
+            except IntegrityError:
+                db.session.rollback()
+                app.logger.error(f"[Login] IntegrityError creating user {user_data['username']}")
+                return jsonify({'error': 'User conflict. Please contact support.'}), 500
+    else:
+        # Third: Check database directly (users created via invitations)
+        user = User.query.filter(
+            (User.username == username) | (User.email == username)
+        ).first()
+        if not user or not user.password_hash or not user.check_password(password):
+            return jsonify({'error': 'Invalid credentials'}), 401
+
+    # Trial / disabled checks (never apply to the env admin)
+    if not is_admin_user(user.username):
+        if user.is_disabled:
+            return jsonify({'error': 'Cuenta deshabilitada. Escribinos a hola@laia.ar para seguir probando y charlando. :)'}), 403
+        if user.trial_expires_at and datetime.utcnow() > user.trial_expires_at:
+            return jsonify({'error': 'Tu período de prueba ha expirado. Renová tu invitación escribiendo a hola@laia.ar'}), 403
+
     login_user(user)
     
     # Debug logging
@@ -470,6 +546,7 @@ def local_login():
         'username': user.username,
         'email': user.email,
         'name': user.name,
+        'can_create_invites': bool(user.can_create_invites),
         'is_admin': is_admin_user(username)
     })
 
@@ -509,8 +586,46 @@ def admin_users():
             'username': user.username,
             'email': user.email,
             'name': user.name,
-            'is_admin': is_admin_user(user.username)
+            'is_admin': is_admin_user(user.username),
+            'can_create_invites': bool(user.can_create_invites),
+            'is_disabled': bool(user.is_disabled),
+            'trial_expires_at': user.trial_expires_at.isoformat() if user.trial_expires_at else None
         } for user in users]
+    })
+
+@app.route('/api/admin/users/<int:user_id>/features', methods=['POST'])
+@login_required
+def admin_update_user_features(user_id):
+    if not is_admin_user(current_user.username):
+        return jsonify({'error': 'Admin access required'}), 403
+
+    user = User.query.get_or_404(user_id)
+    data = request.get_json() or {}
+
+    if 'can_create_invites' in data:
+        user.can_create_invites = bool(data['can_create_invites'])
+
+    if 'is_disabled' in data:
+        user.is_disabled = bool(data['is_disabled'])
+
+    if 'trial_extension_days' in data:
+        try:
+            days = int(data['trial_extension_days'])
+        except (TypeError, ValueError):
+            return jsonify({'error': 'trial_extension_days debe ser un número entero.'}), 400
+        if days <= 0 or days > 365:
+            return jsonify({'error': 'trial_extension_days debe estar entre 1 y 365.'}), 400
+        user.trial_expires_at = _trial_expiry_utc(days)
+        user.is_disabled = False
+
+    db.session.commit()
+
+    return jsonify({
+        'id': user.id,
+        'username': user.username,
+        'can_create_invites': bool(user.can_create_invites),
+        'is_disabled': bool(user.is_disabled),
+        'trial_expires_at': user.trial_expires_at.isoformat() if user.trial_expires_at else None
     })
 
 @app.route('/api/admin/users/rawjson', methods=['GET'])
@@ -954,6 +1069,276 @@ def query():
             "response_text": e.response.text if hasattr(e, 'response') else None
         }
         return jsonify(error_details), 500
+
+# Invitation link endpoints (personal, single-use links)
+@app.route('/api/invitations', methods=['GET'])
+@login_required
+def get_invitations():
+    if not current_user.can_create_invites:
+        return jsonify({'error': 'No tenés permiso para ver invitaciones.'}), 403
+
+    links = InvitationLink.query.filter_by(created_by_id=current_user.id).order_by(InvitationLink.created_at.desc()).all()
+    return jsonify({
+        'invitations': [{
+            'id': link.id,
+            'token': link.token,
+            'created_at': link.created_at.isoformat() if link.created_at else None,
+            'expires_at': link.expires_at.isoformat() if link.expires_at else None,
+            'used': link.used_by_id is not None,
+            'used_at': link.used_at.isoformat() if link.used_at else None,
+            'used_by_email': link.used_by.email if link.used_by else None,
+        } for link in links]
+    })
+
+@app.route('/api/invitations', methods=['POST'])
+@login_required
+def create_invitation():
+    if not current_user.can_create_invites:
+        return jsonify({'error': 'No tenés permiso para crear invitaciones.'}), 403
+
+    token = secrets.token_urlsafe(32)
+    link = InvitationLink(
+        token=token,
+        created_by_id=current_user.id,
+        expires_at=datetime.utcnow() + timedelta(days=7)
+    )
+    db.session.add(link)
+    db.session.commit()
+
+    frontend_url = os.getenv('FRONTEND_URL', '')
+    invite_url = f"{frontend_url.rstrip('/')}/invite/{token}"
+
+    return jsonify({
+        'id': link.id,
+        'token': link.token,
+        'invite_url': invite_url,
+        'expires_at': link.expires_at.isoformat()
+    }), 201
+
+@app.route('/api/invitations/<token>', methods=['GET'])
+def check_invitation(token):
+    link = InvitationLink.query.filter_by(token=token).first()
+    if not link:
+        return jsonify({'error': 'Link de invitación no encontrado.'}), 404
+
+    if link.used_by_id is not None:
+        return jsonify({'error': 'Este link de invitación ya fue utilizado.'}), 410
+
+    if link.expires_at and datetime.utcnow() > link.expires_at:
+        return jsonify({'error': 'Este link de invitación ha expirado.'}), 410
+
+    return jsonify({'valid': True})
+
+def _register_trial_user(duration_days):
+    """Shared registration logic for invitation link/code signups."""
+    data = request.get_json() or {}
+    username = data.get('username')
+    email = data.get('email')
+    name = data.get('name')
+    password = data.get('password')
+
+    if not username or not email or not name or not password:
+        return None, (jsonify({'error': 'Todos los campos son obligatorios.'}), 400)
+
+    if len(password) < 6:
+        return None, (jsonify({'error': 'La contraseña debe tener al menos 6 caracteres.'}), 400)
+
+    existing = User.query.filter((User.username == username) | (User.email == email)).first()
+    if existing:
+        return None, (jsonify({'error': 'El usuario o email ya está registrado.'}), 409)
+
+    user = User(
+        username=username,
+        email=email,
+        name=name,
+        trial_expires_at=_trial_expiry_utc(duration_days),
+        is_disabled=False
+    )
+    user.set_password(password)
+    return user, None
+
+@app.route('/api/invitations/<token>/register', methods=['POST'])
+def register_with_invitation(token):
+    link = InvitationLink.query.filter_by(token=token).first()
+    if not link:
+        return jsonify({'error': 'Link de invitación no encontrado.'}), 404
+
+    if link.used_by_id is not None:
+        return jsonify({'error': 'Este link de invitación ya fue utilizado.'}), 410
+
+    if link.expires_at and datetime.utcnow() > link.expires_at:
+        return jsonify({'error': 'Este link de invitación ha expirado.'}), 410
+
+    user, error = _register_trial_user(15)
+    if error:
+        return error
+
+    try:
+        db.session.add(user)
+        db.session.commit()
+
+        link.used_by_id = user.id
+        link.used_at = datetime.utcnow()
+        db.session.commit()
+
+        return jsonify({
+            'message': 'Cuenta creada exitosamente. Iniciá sesión para comenzar.',
+            'user_id': user.id
+        }), 201
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({'error': 'Error al crear el usuario. Intentá con otro nombre o email.'}), 500
+
+# Invitation code endpoints (multi-use, word-based codes managed by admins)
+def _validate_invitation_code(raw_code):
+    code_str = _normalize_code(raw_code)
+    code = InvitationCode.query.filter_by(code=code_str).first() if code_str else None
+    if not code:
+        return None, (jsonify({'error': 'Código de invitación no encontrado.'}), 404)
+    if not code.is_active:
+        return None, (jsonify({'error': 'Este código de invitación fue desactivado.'}), 410)
+    if datetime.utcnow() > code.expires_at:
+        return None, (jsonify({'error': 'Este código de invitación ha expirado.'}), 410)
+    if code.max_uses is not None and code.uses_count >= code.max_uses:
+        return None, (jsonify({'error': 'Este código de invitación ya alcanzó el máximo de usos.'}), 410)
+    return code, None
+
+@app.route('/api/admin/invitation-codes', methods=['GET'])
+@login_required
+def admin_get_invitation_codes():
+    if not is_admin_user(current_user.username):
+        return jsonify({'error': 'Admin access required'}), 403
+
+    codes = InvitationCode.query.order_by(InvitationCode.created_at.desc()).all()
+    return jsonify({
+        'codes': [{
+            'id': c.id,
+            'code': c.code,
+            'created_at': c.created_at.isoformat() if c.created_at else None,
+            'duration_days': c.duration_days,
+            'max_uses': c.max_uses,
+            'uses_count': c.uses_count,
+            'is_active': c.is_active,
+            'expires_at': c.expires_at.isoformat() if c.expires_at else None,
+            'used_by': [use.user.email for use in c.uses if use.user],
+        } for c in codes]
+    })
+
+@app.route('/api/admin/invitation-codes', methods=['POST'])
+@login_required
+def admin_create_invitation_code():
+    if not is_admin_user(current_user.username):
+        return jsonify({'error': 'Admin access required'}), 403
+
+    data = request.get_json() or {}
+
+    duration_days = data.get('duration_days')
+    if duration_days not in (7, 15, 30):
+        return jsonify({'error': 'duration_days debe ser 7, 15 o 30.'}), 400
+
+    max_uses = data.get('max_uses')
+    if max_uses is not None:
+        try:
+            max_uses = int(max_uses)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'max_uses debe ser un número entero.'}), 400
+        if max_uses < 1:
+            return jsonify({'error': 'max_uses debe ser al menos 1.'}), 400
+
+    expires_on = data.get('expires_on')
+    if expires_on:
+        try:
+            expires_on_date = datetime.strptime(expires_on, '%Y-%m-%d').date()
+        except (TypeError, ValueError):
+            return jsonify({'error': 'expires_on debe tener formato YYYY-MM-DD.'}), 400
+    else:
+        expires_on_date = _today_ar()
+
+    # Valid until 24:00 ART of expires_on == 00:00 ART of the next day
+    expires_at = _start_of_day_ar_utc(expires_on_date + timedelta(days=1))
+
+    code_str = None
+    for _ in range(20):
+        candidate = _generate_invitation_code()
+        if not InvitationCode.query.filter_by(code=candidate).first():
+            code_str = candidate
+            break
+    if not code_str:
+        return jsonify({'error': 'No se pudo generar un código único. Intentá de nuevo.'}), 500
+
+    code = InvitationCode(
+        code=code_str,
+        created_by_id=current_user.id,
+        duration_days=duration_days,
+        max_uses=max_uses,
+        expires_at=expires_at,
+    )
+    db.session.add(code)
+    db.session.commit()
+
+    frontend_url = os.getenv('FRONTEND_URL', '')
+    join_url = f"{frontend_url.rstrip('/')}/join/{code_str}"
+
+    return jsonify({
+        'id': code.id,
+        'code': code.code,
+        'join_url': join_url,
+        'duration_days': code.duration_days,
+        'max_uses': code.max_uses,
+        'expires_at': code.expires_at.isoformat(),
+    }), 201
+
+@app.route('/api/admin/invitation-codes/<int:code_id>/toggle', methods=['POST'])
+@login_required
+def admin_toggle_invitation_code(code_id):
+    if not is_admin_user(current_user.username):
+        return jsonify({'error': 'Admin access required'}), 403
+
+    code = InvitationCode.query.get_or_404(code_id)
+    code.is_active = not code.is_active
+    db.session.commit()
+
+    return jsonify({'id': code.id, 'is_active': code.is_active})
+
+@app.route('/api/invitation-codes/<code>', methods=['GET'])
+def check_invitation_code(code):
+    if _is_rate_limited(request.remote_addr or 'unknown'):
+        return jsonify({'error': 'Demasiados intentos. Esperá un minuto y probá de nuevo.'}), 429
+
+    code_obj, error = _validate_invitation_code(code)
+    if error:
+        return error
+
+    return jsonify({'valid': True, 'duration_days': code_obj.duration_days})
+
+@app.route('/api/invitation-codes/<code>/register', methods=['POST'])
+def register_with_invitation_code(code):
+    if _is_rate_limited(request.remote_addr or 'unknown'):
+        return jsonify({'error': 'Demasiados intentos. Esperá un minuto y probá de nuevo.'}), 429
+
+    code_obj, error = _validate_invitation_code(code)
+    if error:
+        return error
+
+    user, error = _register_trial_user(code_obj.duration_days)
+    if error:
+        return error
+
+    try:
+        db.session.add(user)
+        db.session.commit()
+
+        code_obj.uses_count = (code_obj.uses_count or 0) + 1
+        db.session.add(InvitationCodeUse(code_id=code_obj.id, user_id=user.id))
+        db.session.commit()
+
+        return jsonify({
+            'message': 'Cuenta creada exitosamente. Iniciá sesión para comenzar.',
+            'user_id': user.id
+        }), 201
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({'error': 'Error al crear el usuario. Intentá con otro nombre o email.'}), 500
 
 # Global error handler for 500 errors
 @app.errorhandler(500)
