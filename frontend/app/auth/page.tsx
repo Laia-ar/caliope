@@ -192,7 +192,11 @@ export default function LoginPage() {
 
           {/* Forgot Password Link */}
           <div className="text-left">
-            <button type="button" className="text-sm text-gray-600 hover:text-gray-900 underline">
+            <button
+              type="button"
+              onClick={() => router.push("/forgot-password")}
+              className="text-sm text-gray-600 hover:text-gray-900 underline"
+            >
               Recuperar contraseña
             </button>
           </div>

@@ -8,17 +8,20 @@ import json
 import re
 import secrets
 import shutil
+import hashlib
+import smtplib
 import threading
 import time
 import unicodedata
 from datetime import datetime, timedelta, timezone
+from email.message import EmailMessage
 from pathlib import Path
 from dotenv import load_dotenv
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from extensions import db
-from models import init_db, User, Document, CustomPrompt, InvitationLink, InvitationCode, InvitationCodeUse
+from models import init_db, User, Document, CustomPrompt, InvitationLink, InvitationCode, InvitationCodeUse, PasswordResetToken
 from authlib.integrations.flask_client import OAuth
 from urllib.parse import urljoin, urlparse
 
@@ -117,6 +120,31 @@ def _is_rate_limited(key):
         hits.append(now)
         _rate_limit_hits[key] = hits
         return False
+
+# --- Password reset (Gmail SMTP) ---
+
+def _send_email(to_address, subject, text_body, html_body=None):
+    """Send via Gmail SMTP (SSL). Requires SMTP_USER/SMTP_PASSWORD (app password)."""
+    smtp_user = os.getenv('SMTP_USER')
+    smtp_password = os.getenv('SMTP_PASSWORD')
+    if not smtp_user or not smtp_password:
+        app.logger.error("[Email] SMTP_USER/SMTP_PASSWORD no configurados; email no enviado")
+        return False
+
+    msg = EmailMessage()
+    msg['From'] = f"Calíope <{os.getenv('EMAIL_FROM', smtp_user)}>"
+    msg['To'] = to_address
+    msg['Subject'] = subject
+    msg.set_content(text_body)
+    if html_body:
+        msg.add_alternative(html_body, subtype='html')
+
+    host = os.getenv('SMTP_HOST', 'smtp.gmail.com')
+    port = int(os.getenv('SMTP_PORT', '465'))
+    with smtplib.SMTP_SSL(host, port, timeout=15) as smtp:
+        smtp.login(smtp_user, smtp_password)
+        smtp.send_message(msg)
+    return True
 
 # Load environment variables from .env file in project root
 env_path = Path(__file__).resolve().parent.parent / '.env'
@@ -1357,6 +1385,103 @@ def register_with_invitation_code(code):
     except IntegrityError:
         db.session.rollback()
         return jsonify({'error': 'Error al crear el usuario. Intentá con otro nombre o email.'}), 500
+
+# Password reset endpoints
+FORGOT_PASSWORD_RESPONSE = 'Si existe una cuenta con ese email, te enviamos un link para restablecer la contraseña.'
+_RESET_TOKEN_TTL = timedelta(hours=1)
+_RESET_MAX_PER_EMAIL_PER_HOUR = 3
+
+@app.route('/api/forgot-password', methods=['POST'])
+def forgot_password():
+    if _is_rate_limited(f"forgot:{request.remote_addr or 'unknown'}"):
+        return jsonify({'error': 'Demasiados intentos. Esperá un minuto y probá de nuevo.'}), 429
+
+    data = request.get_json() or {}
+    email = (data.get('email') or '').strip().lower()
+    if not email:
+        return jsonify({'error': 'Ingresá tu email.'}), 400
+
+    # Respuesta uniforme para no revelar si el email existe
+    user = User.query.filter(db.func.lower(User.email) == email).first()
+    if not user or not user.password_hash:
+        return jsonify({'message': FORGOT_PASSWORD_RESPONSE})
+
+    # Límite por email para evitar mail-bombing
+    recent = PasswordResetToken.query.filter(
+        PasswordResetToken.user_id == user.id,
+        PasswordResetToken.created_at > datetime.utcnow() - timedelta(hours=1),
+    ).count()
+    if recent >= _RESET_MAX_PER_EMAIL_PER_HOUR:
+        app.logger.warning(f"[Password Reset] Límite por email alcanzado para user_id={user.id}")
+        return jsonify({'message': FORGOT_PASSWORD_RESPONSE})
+
+    # Invalidar tokens anteriores sin usar
+    PasswordResetToken.query.filter(
+        PasswordResetToken.user_id == user.id,
+        PasswordResetToken.used_at.is_(None),
+    ).update({'used_at': datetime.utcnow()})
+
+    token = secrets.token_urlsafe(32)
+    record = PasswordResetToken(
+        user_id=user.id,
+        token_hash=hashlib.sha256(token.encode()).hexdigest(),
+        expires_at=datetime.utcnow() + _RESET_TOKEN_TTL,
+    )
+    db.session.add(record)
+    db.session.commit()
+
+    frontend_url = os.getenv('FRONTEND_URL', '')
+    reset_url = f"{frontend_url.rstrip('/')}/reset-password/{token}"
+
+    text_body = (
+        f"Hola {user.name},\n\n"
+        f"Recibimos un pedido para restablecer la contraseña de tu cuenta de Calíope.\n\n"
+        f"Entrá a este link (válido por 1 hora, un solo uso):\n{reset_url}\n\n"
+        f"Si no fuiste vos, ignorá este email: tu contraseña no cambió.\n\n"
+        f"— Equipo Calíope"
+    )
+    html_body = (
+        f"<p>Hola {user.name},</p>"
+        f"<p>Recibimos un pedido para restablecer la contraseña de tu cuenta de Calíope.</p>"
+        f"<p><a href=\"{reset_url}\">Restablecer contraseña</a> "
+        f"(válido por 1 hora, un solo uso)</p>"
+        f"<p>Si no fuiste vos, ignorá este email: tu contraseña no cambió.</p>"
+        f"<p>— Equipo Calíope</p>"
+    )
+
+    try:
+        _send_email(user.email, 'Restablecé tu contraseña de Calíope', text_body, html_body)
+        app.logger.info(f"[Password Reset] Email enviado a user_id={user.id}")
+    except Exception as e:
+        app.logger.error(f"[Password Reset] Error enviando email a user_id={user.id}: {e}")
+
+    return jsonify({'message': FORGOT_PASSWORD_RESPONSE})
+
+@app.route('/api/reset-password/<token>', methods=['POST'])
+def reset_password(token):
+    if _is_rate_limited(f"reset:{request.remote_addr or 'unknown'}"):
+        return jsonify({'error': 'Demasiados intentos. Esperá un minuto y probá de nuevo.'}), 429
+
+    data = request.get_json() or {}
+    password = data.get('password') or ''
+    if len(password) < 6:
+        return jsonify({'error': 'La contraseña debe tener al menos 6 caracteres.'}), 400
+
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    record = PasswordResetToken.query.filter_by(token_hash=token_hash).first()
+
+    if not record or record.used_at is not None:
+        return jsonify({'error': 'Este link ya fue utilizado o es inválido.'}), 410
+    if datetime.utcnow() > record.expires_at:
+        return jsonify({'error': 'Este link ha expirado. Pedí uno nuevo.'}), 410
+
+    user = record.user
+    user.set_password(password)
+    record.used_at = datetime.utcnow()
+    db.session.commit()
+
+    app.logger.info(f"[Password Reset] Contraseña actualizada para user_id={user.id}")
+    return jsonify({'message': 'Contraseña actualizada. Iniciá sesión con tu nueva contraseña.'})
 
 # Global error handler for 500 errors
 @app.errorhandler(500)
