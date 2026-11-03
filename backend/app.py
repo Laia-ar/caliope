@@ -121,14 +121,41 @@ def _is_rate_limited(key):
         _rate_limit_hits[key] = hits
         return False
 
-# --- Password reset (Gmail SMTP) ---
+# --- Password reset (email: service account + Gmail API, SMTP fallback) ---
 
-def _send_email(to_address, subject, text_body, html_body=None):
+def _send_email_via_gmail_api(to_address, subject, text_body, html_body):
+    """Send via Gmail API using a service account with domain-wide delegation."""
+    from google.oauth2 import service_account
+    from googleapiclient.discovery import build
+    import base64
+
+    sa_file = os.getenv('GOOGLE_SERVICE_ACCOUNT_FILE')
+    send_as = os.getenv('EMAIL_SEND_AS') or os.getenv('SMTP_USER')
+    if not sa_file or not send_as:
+        return False
+
+    creds = service_account.Credentials.from_service_account_file(
+        sa_file, scopes=['https://www.googleapis.com/auth/gmail.send']
+    ).with_subject(send_as)
+    service = build('gmail', 'v1', credentials=creds, cache_discovery=False)
+
+    msg = EmailMessage()
+    msg['From'] = f"Calíope <{send_as}>"
+    msg['To'] = to_address
+    msg['Subject'] = subject
+    msg.set_content(text_body)
+    if html_body:
+        msg.add_alternative(html_body, subtype='html')
+
+    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+    service.users().messages().send(userId='me', body={'raw': raw}).execute()
+    return True
+
+def _send_email_via_smtp(to_address, subject, text_body, html_body):
     """Send via Gmail SMTP (SSL). Requires SMTP_USER/SMTP_PASSWORD (app password)."""
     smtp_user = os.getenv('SMTP_USER')
     smtp_password = os.getenv('SMTP_PASSWORD')
     if not smtp_user or not smtp_password:
-        app.logger.error("[Email] SMTP_USER/SMTP_PASSWORD no configurados; email no enviado")
         return False
 
     msg = EmailMessage()
@@ -145,6 +172,24 @@ def _send_email(to_address, subject, text_body, html_body=None):
         smtp.login(smtp_user, smtp_password)
         smtp.send_message(msg)
     return True
+
+def _send_email(to_address, subject, text_body, html_body=None):
+    """Prefer Gmail API (service account, scope gmail.send); fallback to SMTP."""
+    try:
+        if _send_email_via_gmail_api(to_address, subject, text_body, html_body):
+            return True
+    except Exception as e:
+        app.logger.error(f"[Email] Falló Gmail API, intentando SMTP: {e}")
+
+    try:
+        if _send_email_via_smtp(to_address, subject, text_body, html_body):
+            return True
+    except Exception as e:
+        app.logger.error(f"[Email] Falló SMTP: {e}")
+        raise
+
+    app.logger.error("[Email] Ni Gmail API ni SMTP configurados; email no enviado")
+    return False
 
 # Load environment variables from .env file in project root
 env_path = Path(__file__).resolve().parent.parent / '.env'
