@@ -139,8 +139,10 @@ def _send_email_via_gmail_api(to_address, subject, text_body, html_body):
     ).with_subject(send_as)
     service = build('gmail', 'v1', credentials=creds, cache_discovery=False)
 
+    from_address = os.getenv('EMAIL_FROM', send_as)
+
     msg = EmailMessage()
-    msg['From'] = f"Calíope <{send_as}>"
+    msg['From'] = f"Calíope <{from_address}>"
     msg['To'] = to_address
     msg['Subject'] = subject
     msg.set_content(text_body)
